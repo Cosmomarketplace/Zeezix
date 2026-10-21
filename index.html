@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+<meta name="theme-color" content="#5B2D9B" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<title>Zeezix — Kids Games</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<style>
+  :root{ --bg1:#5B2D9B; --bg2:#8B5CF6; --bg3:#3aa6ff; --bg4:#9be3ff; --ink:#2d2a26; }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;min-height:100%;background:linear-gradient(170deg,var(--bg1) 0%, var(--bg2) 30%, var(--bg3) 70%, var(--bg4) 110%);
+    font-family:system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+    -webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;color:#fff;}
+  body{min-height:100svh;display:flex;flex-direction:column;align-items:center;
+    padding:calc(20px + env(safe-area-inset-top,0)) 16px calc(28px + env(safe-area-inset-bottom,0));}
+  #resetBtn{position:fixed;top:calc(10px + env(safe-area-inset-top,0));right:14px;background:rgba(255,255,255,.15);
+    color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:999px;padding:6px 12px;
+    font-size:12px;font-weight:700;cursor:pointer;z-index:5;}
+  #resetBtn:active{background:rgba(255,255,255,.25);}
+  header{text-align:center;margin:8px 0 18px;}
+  .title{font-size:clamp(28px,7vw,44px);font-weight:900;letter-spacing:.5px;
+    text-shadow:0 4px 0 rgba(0,0,0,.18), 0 2px 14px rgba(0,0,0,.25);margin:0;line-height:1.05;}
+  .sub{opacity:.95;font-size:clamp(14px,3.6vw,18px);margin-top:6px;text-shadow:0 1px 0 rgba(0,0,0,.15);}
+  .cards{display:grid;grid-template-columns:1fr;gap:18px;width:100%;max-width:520px;margin:8px 0 18px;}
+  @media (min-width: 600px){ .cards{grid-template-columns:repeat(2,1fr);max-width:780px;} }
+  @media (min-width: 1000px){ .cards{grid-template-columns:repeat(3,1fr);max-width:1120px;} }
+  .card{background:#fff;border-radius:24px;padding:14px 14px 16px;color:var(--ink);
+    box-shadow:0 8px 0 rgba(0,0,0,.18), 0 20px 40px rgba(0,0,0,.22);
+    text-decoration:none;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
+    transform:translateY(0);transition:transform .12s ease, box-shadow .12s ease;}
+  .card:active{transform:translateY(4px);box-shadow:0 4px 0 rgba(0,0,0,.18), 0 8px 18px rgba(0,0,0,.22);}
+  .icon{width:100%;aspect-ratio:16/10;border-radius:18px;display:flex;align-items:center;justify-content:center;
+    font-size:54px;line-height:1;margin-bottom:10px;position:relative;overflow:hidden;}
+  .icon svg{width:100%;height:100%;display:block;}
+  .name{font-weight:900;font-size:clamp(18px,4.4vw,24px);letter-spacing:.2px;}
+  .tag{font-size:13px;opacity:.7;margin-top:2px;text-align:center;}
+  .play{margin-top:10px;background:var(--bg1);color:#fff;border:none;border-radius:999px;
+    font-weight:800;padding:10px 18px;font-size:16px;box-shadow:0 4px 0 rgba(0,0,0,.18);}
+  .card.runner .icon{background:linear-gradient(135deg,#7ec8e3,#4caf50);}
+  .card.coloring .icon{background:linear-gradient(135deg,#ffd54a,#ff7eb4);}
+  .card.dash .icon{background:linear-gradient(135deg,#3aa6ff,#9c64f2);}
+  .card.runner .play{background:#2e7d32;}
+  .card.coloring .play{background:#c2185b;}
+  .card.dash .play{background:#5f4bb6;}
+  .card.bubble .icon{background:linear-gradient(135deg,#b6ecff,#3aa6ff);}
+  .card.pairs .icon{background:linear-gradient(135deg,#C8B6E2,#8B5CF6);}
+  .card.swim .icon{background:linear-gradient(135deg,#5fbcf0,#2f8fd6);}
+  .card.bubble .play{background:#0f7bbd;}
+  .card.pairs .play{background:#5B2D9B;}
+  .card.swim .play{background:#e0457b;}
+  footer{margin-top:auto;font-size:12px;opacity:.85;text-align:center;line-height:1.4;}
+  footer .row{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;}
+  .badge{background:rgba(255,255,255,.18);padding:4px 10px;border-radius:999px;font-weight:700;}
+  .hint{margin-top:8px;font-size:12px;opacity:.85;}
+  a.card:focus-visible{outline:4px solid #fff;outline-offset:4px;}
+</style>
+</head>
+<body>
+<button id="resetBtn" aria-label="Reset progress (parents)">⚙ Parents</button>
+<header>
+  <h1 class="title"><img src="mascot.svg" alt="" style="height:1.4em;vertical-align:-0.4em;margin-right:.15em" /> Zeezix</h1>
+  <div class="sub">Dive in! Pick a game and tap to play.</div>
+</header>
+
+<nav class="cards" aria-label="Games">
+  <a class="card runner" href="game1_rainbow_runner.html" aria-label="Play Rainbow Runner">
+    <div class="icon" aria-hidden="true">
+      <svg viewBox="0 0 200 130" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="r-sky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#7ec8e3"/><stop offset="1" stop-color="#bde7ff"/>
+          </linearGradient>
+        </defs>
+        <rect width="200" height="80" fill="url(#r-sky)"/>
+        <rect y="80" width="200" height="50" fill="#4caf50"/>
+        <polygon points="60,80 140,80 170,130 30,130" fill="#c79b6a"/>
+        <circle cx="170" cy="22" r="14" fill="#ffd54a"/>
+        <g transform="translate(100,68)">
+          <ellipse cy="22" rx="20" ry="6" fill="rgba(0,0,0,.2)"/>
+          <circle r="18" fill="#f08c3a"/>
+          <circle cy="-15" r="14" fill="#f08c3a"/>
+          <polygon points="-10,-22 -14,-32 -4,-28" fill="#f08c3a"/>
+          <polygon points="10,-22 14,-32 4,-28" fill="#f08c3a"/>
+          <circle cx="-5" cy="-15" r="2.5" fill="#fff"/>
+          <circle cx="5" cy="-15" r="2.5" fill="#fff"/>
+        </g>
+        <polygon points="40,90 60,90 50,72" fill="#7a4f2a"/>
+      </svg>
+    </div>
+    <div class="name">Rainbow Runner</div>
+    <div class="tag">Run, jump, collect gems</div>
+    <button class="play" type="button" tabindex="-1">▶ Play</button>
+  </a>
+
+  <a class="card coloring" href="game2_magic_coloring_book.html" aria-label="Play Magic Coloring Book">
+    <div class="icon" aria-hidden="true">
+      <svg viewBox="0 0 200 130" xmlns="http://www.w3.org/2000/svg">
+        <rect width="200" height="130" fill="#fff8e7"/>
+        <g stroke="#2d2a26" stroke-width="3" stroke-linejoin="round" fill="#fff">
+          <circle cx="70" cy="70" r="20" fill="#ffd54a"/>
+          <circle cx="50" cy="50" r="14" fill="#ff7eb4"/>
+          <circle cx="90" cy="50" r="14" fill="#ff7eb4"/>
+          <circle cx="50" cy="90" r="14" fill="#ff7eb4"/>
+          <circle cx="90" cy="90" r="14" fill="#ff7eb4"/>
+          <rect x="66" y="86" width="8" height="34" fill="#48b06a"/>
+        </g>
+        <g transform="translate(140,30)">
+          <rect x="-12" y="0" width="48" height="8" fill="#e63946" stroke="#2d2a26" stroke-width="2"/>
+          <rect x="-12" y="14" width="48" height="8" fill="#ffd54a" stroke="#2d2a26" stroke-width="2"/>
+          <rect x="-12" y="28" width="48" height="8" fill="#3aa6ff" stroke="#2d2a26" stroke-width="2"/>
+          <rect x="-12" y="42" width="48" height="8" fill="#9c64f2" stroke="#2d2a26" stroke-width="2"/>
+          <rect x="-12" y="56" width="48" height="8" fill="#48b06a" stroke="#2d2a26" stroke-width="2"/>
+        </g>
+      </svg>
+    </div>
+    <div class="name">Magic Coloring Book</div>
+    <div class="tag">Tap to color the picture</div>
+    <button class="play" type="button" tabindex="-1">▶ Play</button>
+  </a>
+
+  <a class="card dash" href="game3_color_dash.html" aria-label="Play Color Dash">
+    <div class="icon" aria-hidden="true">
+      <svg viewBox="0 0 200 130" xmlns="http://www.w3.org/2000/svg">
+        <rect width="200" height="130" fill="#2a2f5b"/>
+        <rect x="6" y="6" width="120" height="44" rx="6" fill="#fff" stroke="#2d2a26" stroke-width="2"/>
+        <g transform="translate(20,18)" stroke="#2d2a26" stroke-width="2" fill="#fff">
+          <circle r="10" cx="20" cy="14" fill="#ffd54a"/>
+          <circle r="6" cx="40" cy="10" fill="#ff7eb4"/>
+          <rect x="60" y="6" width="20" height="16" fill="#3aa6ff"/>
+          <polygon points="90,6 100,22 80,22" fill="#48b06a"/>
+        </g>
+        <polygon points="40,130 70,60 130,60 160,130" fill="#1a1d3a"/>
+        <g transform="translate(100,108)">
+          <rect x="-12" y="-6" width="24" height="14" fill="#c5c8e6"/>
+          <rect x="-10" y="-20" width="20" height="14" fill="#e1e3f0"/>
+          <rect x="-7" y="-17" width="14" height="6" fill="#3aa6ff"/>
+        </g>
+        <ellipse cx="60" cy="80" rx="6" ry="8" fill="#e63946"/>
+        <ellipse cx="140" cy="90" rx="6" ry="8" fill="#3aa6ff"/>
+        <ellipse cx="100" cy="70" rx="6" ry="8" fill="#ffd54a"/>
+      </svg>
+    </div>
+    <div class="name">Color Dash</div>
+    <div class="tag">Run and paint the picture</div>
+    <button class="play" type="button" tabindex="-1">▶ Play</button>
+  </a>
+
+  <a class="card bubble" href="game4_bubble_pop_abc.html" aria-label="Play Bubble Pop ABC">
+    <div class="icon" aria-hidden="true">
+      <svg viewBox="0 0 200 130" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="b-water" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#b6ecff"/><stop offset="1" stop-color="#2f8fd6"/>
+          </linearGradient>
+        </defs>
+        <rect width="200" height="130" fill="url(#b-water)"/>
+        <path d="M0 130 L0 112 Q20 104 40 112 T80 112 T120 112 T160 112 T200 112 L200 130 Z" fill="#f6e3a1"/>
+        <g stroke="#7ed957" stroke-width="5" stroke-linecap="round" fill="none">
+          <path d="M150 112 Q156 95 150 80"/><path d="M172 112 Q166 92 174 76"/>
+        </g>
+        <g fill="#ff82b4"><circle cx="30" cy="104" r="9"/><circle cx="42" cy="96" r="8"/><circle cx="22" cy="92" r="7"/></g>
+        <g font-family="system-ui,Arial,sans-serif" font-weight="900" text-anchor="middle">
+          <circle cx="70" cy="50" r="24" fill="rgba(255,255,255,.55)" stroke="#fff" stroke-width="3"/>
+          <text x="70" y="60" font-size="28" fill="#5B2D9B">A</text>
+          <circle cx="130" cy="34" r="20" fill="rgba(255,255,255,.55)" stroke="#fff" stroke-width="3"/>
+          <text x="130" y="42" font-size="24" fill="#e0457b">B</text>
+          <circle cx="118" cy="86" r="18" fill="rgba(255,255,255,.55)" stroke="#ffdc50" stroke-width="3"/>
+          <text x="118" y="93" font-size="22" fill="#1b7fc4">C</text>
+        </g>
+        <polygon points="178,14 182,24 193,25 185,32 187,43 178,37 169,43 171,32 163,25 174,24" fill="#ffdc50" stroke="#2d2a26" stroke-width="2" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="name">Bubble Pop ABC</div>
+    <div class="tag">Pop the letter bubbles</div>
+    <button class="play" type="button" tabindex="-1">▶ Play</button>
+  </a>
+
+  <a class="card pairs" href="game5_reef_pairs.html" aria-label="Play Reef Pairs">
+    <div class="icon" aria-hidden="true">
+      <svg viewBox="0 0 200 130" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="p-card" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#8B5CF6"/><stop offset="1" stop-color="#5B2D9B"/>
+          </linearGradient>
+        </defs>
+        <rect width="200" height="130" fill="#7fd1f5"/>
+        <path d="M0 130 L0 116 Q25 108 50 116 T100 116 T150 116 T200 116 L200 130 Z" fill="#f6e3a1"/>
+        <g transform="translate(26,22) rotate(-6)">
+          <rect width="58" height="72" rx="10" fill="url(#p-card)" stroke="#2d2a26" stroke-width="2.5"/>
+          <path d="M29 56 L11 36 Q14 18 29 14 Q44 18 47 36 Z" fill="#C8B6E2" stroke="#4a2384" stroke-width="2" stroke-linejoin="round"/>
+          <g stroke="#4a2384" stroke-width="1.5"><line x1="29" y1="56" x2="19" y2="24"/><line x1="29" y1="56" x2="29" y2="15"/><line x1="29" y1="56" x2="39" y2="24"/></g>
+        </g>
+        <g transform="translate(110,16) rotate(5)">
+          <rect width="62" height="76" rx="10" fill="#fffdf5" stroke="#C8B6E2" stroke-width="3"/>
+          <ellipse cx="31" cy="36" rx="20" ry="22" fill="#9c64f2" stroke="#2d2a26" stroke-width="2.5"/>
+          <ellipse cx="31" cy="46" rx="11" ry="8" fill="#ff9ec6"/>
+          <circle cx="24" cy="30" r="5" fill="#fff" stroke="#2d2a26" stroke-width="1.5"/><circle cx="38" cy="30" r="5" fill="#fff" stroke="#2d2a26" stroke-width="1.5"/>
+          <circle cx="25" cy="31" r="2.5" fill="#2d2a26"/><circle cx="39" cy="31" r="2.5" fill="#2d2a26"/>
+          <path d="M31 14 Q27 6 33 0" stroke="#2d2a26" stroke-width="2" fill="none"/>
+          <polygon points="33,-9 35,-4 40,-3 36,0 37,5 33,2 29,5 30,0 26,-3 31,-4" fill="#ffdc50" stroke="#2d2a26" stroke-width="1.5"/>
+          <text x="31" y="68" font-family="system-ui,Arial,sans-serif" font-weight="800" font-size="11" fill="#5B2D9B" text-anchor="middle">Zeezix</text>
+        </g>
+        <polygon points="96,98 99,105 106,106 101,111 102,118 96,114 90,118 91,111 86,106 93,105" fill="#ffdc50" stroke="#2d2a26" stroke-width="1.5" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="name">Reef Pairs</div>
+    <div class="tag">Flip and match sea friends</div>
+    <button class="play" type="button" tabindex="-1">▶ Play</button>
+  </a>
+
+  <a class="card swim" href="game6_zeezix_swim.html" aria-label="Play Zeezix Swim">
+    <div class="icon" aria-hidden="true">
+      <svg viewBox="0 0 200 130" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="s-water" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#b6ecff"/><stop offset="1" stop-color="#2f8fd6"/>
+          </linearGradient>
+          <linearGradient id="s-body" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#a87ff5"/><stop offset="1" stop-color="#5B2D9B"/>
+          </linearGradient>
+        </defs>
+        <rect width="200" height="130" fill="url(#s-water)"/>
+        <path d="M0 130 L0 114 Q20 106 40 114 T80 114 T120 114 T160 114 T200 114 L200 130 Z" fill="#f6e3a1"/>
+        <rect x="150" y="-6" width="26" height="42" rx="12" fill="#ff82b4"/>
+        <rect x="150" y="84" width="26" height="40" rx="12" fill="#ffb04c"/>
+        <circle cx="150" cy="22" r="6" fill="#e0457b"/><circle cx="176" cy="100" r="6" fill="#e8862a"/>
+        <g transform="translate(70,62)">
+          <polygon points="-30,0 -48,-14 -44,0 -48,14" fill="#5B2D9B" stroke="#2d2a26" stroke-width="2"/>
+          <ellipse cx="-4" cy="-22" rx="11" ry="5" fill="#9c64f2" stroke="#2d2a26" stroke-width="2"/>
+          <path d="M12 -20 Q14 -40 28 -42" stroke="#2d2a26" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+          <ellipse cx="0" cy="0" rx="32" ry="24" fill="url(#s-body)" stroke="#2d2a26" stroke-width="2.5"/>
+          <ellipse cx="4" cy="10" rx="20" ry="10" fill="#ff9ec6"/>
+          <circle cx="15" cy="-6" r="8" fill="#fff" stroke="#2d2a26" stroke-width="1.5"/>
+          <circle cx="16" cy="-5" r="4.5" fill="#7c3aed"/><circle cx="16" cy="-5" r="2.5" fill="#2d2a26"/>
+          <polygon points="31,-52 34,-45 42,-44 36,-39 37,-31 31,-35 25,-31 26,-39 20,-44 28,-45" fill="#ffdc50" stroke="#2d2a26" stroke-width="2" stroke-linejoin="round"/>
+        </g>
+        <polygon points="128,50 131,57 138,58 133,63 134,70 128,66 122,70 123,63 118,58 125,57" fill="#ffdc50" stroke="#2d2a26" stroke-width="1.5" stroke-linejoin="round"/>
+        <circle cx="112" cy="90" r="7" fill="rgba(255,255,255,.55)" stroke="#fff" stroke-width="2"/>
+        <circle cx="30" cy="30" r="5" fill="rgba(255,255,255,.55)" stroke="#fff" stroke-width="2"/>
+      </svg>
+    </div>
+    <div class="name">Zeezix Swim</div>
+    <div class="tag">Hold to swim, grab stars</div>
+    <button class="play" type="button" tabindex="-1">▶ Play</button>
+  </a>
+</nav>
+
+<footer>
+  <div class="row">
+    <span class="badge">🎨 Made for kids</span>
+    <span class="badge">🔒 No ads</span>
+    <span class="badge">🌐 No internet needed</span>
+  </div>
+  <div class="hint">Best on a phone or tablet held upright. Sound is on by default — tap 🔊 in any game to mute.</div>
+</footer>
+
+<script>
+  // Lightweight prefetch: when the user hovers/touches a card, warm the cache for the linked game.
+  document.querySelectorAll('a.card').forEach(card=>{
+    let prefetched = false;
+    const prefetch = ()=>{
+      if(prefetched) return; prefetched = true;
+      const url = card.getAttribute('href');
+      const link = document.createElement('link');
+      link.rel = 'prefetch'; link.href = url; document.head.appendChild(link);
+    };
+    card.addEventListener('pointerenter', prefetch, {once:true});
+    card.addEventListener('touchstart', prefetch, {once:true, passive:true});
+  });
+
+  // Parents-only reset. Uses a math gate (not a long-press) so it's robust on every browser
+  // but unreachable to a 4-year-old who can't multiply yet.
+  document.getElementById('resetBtn').addEventListener('click', ()=>{
+    const a = 3 + Math.floor(Math.random()*7);    // 3..9
+    const b = 3 + Math.floor(Math.random()*7);    // 3..9
+    const answer = prompt(`Parent gate — what is ${a} × ${b}?`);
+    if(answer === null) return;
+    if(parseInt(answer,10) !== a*b){ alert('That’s not quite right — nothing was changed.'); return; }
+    const sure = confirm('Reset all game progress (gems, scenes, paintings, letters, pairs, stars)? This cannot be undone.');
+    if(!sure) return;
+    try{
+      localStorage.removeItem('rainbow_runner_v1');
+      localStorage.removeItem('coloring_book_v1');
+      localStorage.removeItem('color_dash_v1');
+      localStorage.removeItem('bubble_pop_abc_v1');
+      localStorage.removeItem('reef_pairs_v1');
+      localStorage.removeItem('zeezix_swim_v1');
+      alert('All progress reset. Pick a game to start fresh!');
+    } catch(e){ alert('Reset failed: ' + e.message); }
+  });
+</script>
+</body>
+</html>

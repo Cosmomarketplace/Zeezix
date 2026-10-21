@@ -1,0 +1,19 @@
+{
+  "name": "Zeezix — Kids Games",
+  "short_name": "Zeezix",
+  "description": "Six bright, friendly mini-games for kids with Zeezix the anglerfish: a runner, a coloring book, a paint-and-dash hybrid, letter bubbles, reef memory pairs, and a gentle swim.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#5B2D9B",
+  "theme_color": "#5B2D9B",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ]
+}

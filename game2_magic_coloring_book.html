@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+<title>Magic Coloring Book</title>
+<!-- YouTube Playables SDK (loaded before game code per cert requirement). Graceful no-op if not present. -->
+<script src="https://www.youtube.com/game_api/v1" onerror="window.__ytGameLoadFailed=true"></script>
+<style>
+  :root{--bg:#fff8e7;--ink:#2d2a26;--accent:#ff6f91;}
+  html,body{margin:0;padding:0;background:var(--bg);overflow:hidden;
+    font-family:system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+    user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;
+    color:var(--ink);touch-action:manipulation;height:100%;min-height:100svh;width:100%;}
+  body{height:100svh;}
+  #root{position:fixed;inset:0;display:flex;flex-direction:column;height:100svh;}
+  header{padding-top:calc(10px + env(safe-area-inset-top,0));}
+  header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;
+    background:var(--bg);box-shadow:0 2px 0 rgba(0,0,0,.06);z-index:5;}
+  header h1{font-size:18px;margin:0;font-weight:800;letter-spacing:.3px;}
+  .icobtn{background:#fff;border:none;width:42px;height:42px;border-radius:12px;font-size:20px;cursor:pointer;
+    box-shadow:0 2px 0 rgba(0,0,0,.1);}
+  .icobtn:active{transform:translateY(2px);box-shadow:0 0 0 rgba(0,0,0,.1);}
+  .topright{display:flex;gap:8px;}
+  main{flex:1;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;}
+  #stage{max-width:100%;max-height:100%;width:100%;height:100%;display:block;}
+  #stage svg{width:100%;height:100%;display:block;}
+  #stage svg .region{cursor:pointer;transition:fill .15s ease;}
+  footer{padding:10px 8px calc(10px + env(safe-area-inset-bottom,0));background:var(--bg);box-shadow:0 -2px 0 rgba(0,0,0,.06);}
+  .palette{display:flex;gap:8px;overflow-x:auto;padding:4px 8px;scrollbar-width:none;}
+  .palette::-webkit-scrollbar{display:none;}
+  .swatch{flex:0 0 auto;width:54px;height:54px;border-radius:14px;border:3px solid transparent;cursor:pointer;
+    box-shadow:0 2px 0 rgba(0,0,0,.1);position:relative;}
+  .swatch.selected{border-color:var(--ink);transform:scale(1.06);}
+  .swatch[data-locked="true"]::after{
+    content:"🔒";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    background:rgba(0,0,0,.45);border-radius:11px;color:#fff;font-size:18px;}
+  /* Overlays center short content but scroll when there are many scene cards (9 scenes on a phone). */
+  .overlay{position:fixed;inset:0;background:rgba(255,248,231,.95);display:flex;flex-direction:column;
+    align-items:center;justify-content:flex-start;z-index:20;text-align:center;padding:20px;
+    box-sizing:border-box;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+  .overlay::before,.overlay::after{content:"";display:block;margin:auto;flex:0 0 0px;}
+  .overlay > *{flex-shrink:0;}
+  .overlay h2{font-size:30px;margin:0 0 14px;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;max-width:680px;width:100%;margin:0 auto;}
+  .scene-card{background:#fff;border-radius:18px;padding:10px;cursor:pointer;box-shadow:0 4px 0 rgba(0,0,0,.1);
+    position:relative;border:none;}
+  .scene-card svg{width:100%;height:96px;display:block;}
+  .scene-card .title{font-size:13px;font-weight:700;margin-top:6px;text-align:center;}
+  .scene-card.done::after{content:"✓";position:absolute;top:8px;right:10px;background:var(--accent);color:#fff;border-radius:999px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px;}
+  .big{font-size:22px;background:var(--accent);color:#fff;border:none;border-radius:999px;padding:14px 26px;font-weight:800;cursor:pointer;box-shadow:0 4px 0 rgba(0,0,0,.2);}
+  .big:active{transform:translateY(2px);box-shadow:0 2px 0 rgba(0,0,0,.2);}
+  .toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.8);color:#fff;padding:10px 18px;border-radius:999px;font-weight:700;z-index:30;opacity:0;transition:opacity .3s;}
+  .toast.show{opacity:1;}
+  .confetti{position:fixed;inset:0;pointer-events:none;z-index:25;}
+</style>
+</head>
+<body>
+<div id="root">
+  <header>
+    <button class="icobtn" id="homeBtn" title="All games (Zeezix)">⭐</button>
+    <h1 id="sceneTitle">Magic Coloring Book</h1>
+    <div class="topright">
+      <button class="icobtn" id="undoBtn" title="Undo last color">↶</button>
+      <button class="icobtn" id="clearSceneBtn" title="Clear page (start this picture over)">✨</button>
+      <button class="icobtn" id="saveBtn" title="Save picture">💾</button>
+      <button class="icobtn" id="muteBtn" title="Mute">🔊</button>
+    </div>
+  </header>
+  <main><div id="stage"></div></main>
+  <footer>
+    <div class="palette" id="palette"></div>
+  </footer>
+</div>
+
+<div id="homeOverlay" class="overlay">
+  <h2>📖 Magic Coloring Book</h2>
+  <p style="opacity:.8;margin:-8px 0 18px">Pick a scene to color</p>
+  <div class="grid" id="sceneGrid"></div>
+  <p style="margin-top:18px;font-size:13px;opacity:.7">Scenes done: <span id="doneCount">0</span> / <span id="totalCount">9</span></p>
+  <button id="resetThisGame" style="margin-top:4px;background:transparent;border:none;color:rgba(45,42,38,.55);font-size:11px;text-decoration:underline;cursor:pointer;padding:6px 10px;">⚙ Parents: reset this game</button>
+</div>
+
+<div id="winOverlay" class="overlay" style="display:none">
+  <h2>🎉 Ta-da!</h2>
+  <div id="winPreview" style="width:min(80vw,360px);height:240px;background:#fff;border-radius:18px;box-shadow:0 6px 0 rgba(0,0,0,.1);padding:12px;margin-bottom:18px;"></div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
+    <button class="big" id="nextSceneBtn">▶ Next scene</button>
+    <button class="icobtn" id="saveWinBtn" style="width:auto;padding:0 16px">💾 Save image</button>
+    <button class="icobtn" id="winHomeBtn" style="width:auto;padding:0 16px">🏠 Home</button>
+  </div>
+</div>
+
+<canvas id="confetti" class="confetti"></canvas>
+<div class="toast" id="toast"></div>
+
+<script>
+/* =====================================================================
+   Magic Coloring Book — single-file Playable.
+   Nine inline SVG scenes, palette, undo, save-as-PNG, completion animation.
+   No external assets, no network.
+   ===================================================================== */
+
+/* ----------- YouTube Playables SDK Bridge (no-op fallback) ----------- */
+const SAVE_FALLBACK_KEY = 'coloring_book_v1';
+const YTGame = (() => {
+  const hasSdk = typeof ytgame !== 'undefined';
+  const inPlayables = hasSdk && !!ytgame.IN_PLAYABLES_ENV;
+  const safe = (fn) => { try { return fn(); } catch(e){ return undefined; } };
+  return {
+    hasSdk, inPlayables,
+    firstFrameReady(){ if(hasSdk) safe(()=>ytgame.game.firstFrameReady()); },
+    gameReady(){ if(hasSdk) safe(()=>ytgame.game.gameReady()); },
+    saveData(obj){
+      const s = JSON.stringify(obj);
+      if(inPlayables) safe(()=>ytgame.game.saveData(s));
+      try{ localStorage.setItem(SAVE_FALLBACK_KEY, s); }catch(e){}
+    },
+    async loadData(fallback){
+      if(inPlayables){ try{ const s = await ytgame.game.loadData(); if(s) return JSON.parse(s); }catch(e){} }
+      try{ const s = localStorage.getItem(SAVE_FALLBACK_KEY); if(s) return JSON.parse(s); }catch(e){}
+      return fallback;
+    },
+    sendScore(value){
+      if(inPlayables && typeof value === 'number' && isFinite(value))
+        safe(()=>ytgame.engagement.sendScore({value: Math.floor(value)}));
+    },
+    onPause(cb){
+      if(hasSdk) safe(()=>ytgame.system.onPause(cb));
+      window.addEventListener('blur', cb);
+      document.addEventListener('visibilitychange', ()=>{ if(document.hidden) cb(); });
+    },
+    onResume(cb){
+      if(hasSdk) safe(()=>ytgame.system.onResume(cb));
+      window.addEventListener('focus', cb);
+      document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) cb(); });
+    },
+    initialAudioEnabled(){
+      if(hasSdk){ const v = safe(()=>ytgame.system.isAudioEnabled()); if(typeof v === 'boolean') return v; }
+      return true;
+    },
+    onAudioChange(cb){ if(hasSdk) safe(()=>ytgame.system.onAudioEnabledChange(cb)); },
+    logError(msg){ if(hasSdk) safe(()=>ytgame.health.logError()); if(msg) console.warn('[coloring]', msg); },
+  };
+})();
+window.addEventListener('error', e => YTGame.logError(e && e.message));
+
+/* ---------- Palettes ---------- */
+const BASE = ['#e63946','#f07b3f','#ffd54a','#48b06a','#3aa6ff','#9c64f2','#ff7eb4','#a4f0a4','#a8d8ff','#d6c0ff','#ffffff','#2d2a26'];
+const COSMIC = ['#0d1b2a','#1b263b','#415a77','#778da9','#e0e1dd','#ff6f91','#ffd54a','#9c64f2','#3aa6ff','#48b06a','#ff7eb4','#ffffff'];
+const SPARKLE = BASE; // visual sparkle effect added via CSS
+
+/* ---------- Scenes (inline SVG, regions are <path>/<polygon>/<circle> with .region class) ---------- */
+const SCENES = [
+  {
+    id:'garden', title:'Sunny Garden',
+    svg:`<svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+      <rect class="region" data-id="sky" x="0" y="0" width="400" height="180" fill="#fff"/>
+      <rect class="region" data-id="ground" x="0" y="180" width="400" height="120" fill="#fff"/>
+      <circle class="region" data-id="sun" cx="330" cy="60" r="30" fill="#fff"/>
+      <g stroke="#222" stroke-width="3" fill="#fff" stroke-linecap="round" stroke-linejoin="round">
+        <circle class="region" data-id="flower1c" cx="120" cy="200" r="14"/>
+        <circle class="region" data-id="flower1p" cx="120" cy="170" r="14"/>
+        <circle class="region" data-id="flower1p" cx="120" cy="230" r="14"/>
+        <circle class="region" data-id="flower1p" cx="90" cy="200" r="14"/>
+        <circle class="region" data-id="flower1p" cx="150" cy="200" r="14"/>
+        <rect class="region" data-id="stem1" x="116" y="210" width="8" height="60"/>
+        <circle class="region" data-id="flower2c" cx="240" cy="220" r="12"/>
+        <circle class="region" data-id="flower2p" cx="240" cy="195" r="12"/>
+        <circle class="region" data-id="flower2p" cx="240" cy="245" r="12"/>
+        <circle class="region" data-id="flower2p" cx="215" cy="220" r="12"/>
+        <circle class="region" data-id="flower2p" cx="265" cy="220" r="12"/>
+        <rect class="region" data-id="stem2" x="236" y="230" width="8" height="48"/>
+        <path class="region" data-id="butterflyL" d="M70 80 q-20 -20 -34 -6 q-10 12 10 22 q12 6 24 0 z"/>
+        <path class="region" data-id="butterflyR" d="M70 80 q20 -20 34 -6 q10 12 -10 22 q-12 6 -24 0 z"/>
+        <line x1="70" y1="74" x2="70" y2="98" stroke-width="4"/>
+      </g>
+    </svg>`,
+    suggested:{sky:'#a8d8ff', ground:'#48b06a', sun:'#ffd54a',
+      flower1c:'#ffd54a', flower1p:'#ff7eb4', stem1:'#48b06a',
+      flower2c:'#ffd54a', flower2p:'#9c64f2', stem2:'#48b06a',
+      butterflyL:'#3aa6ff', butterflyR:'#3aa6ff'}
+  },
+  {
+    id:'rocket', title:'Rainbow Rocket',
+    svg:`<svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+      <rect class="region" data-id="sky" x="0" y="0" width="400" height="300" fill="#fff"/>
+      <g stroke="#222" stroke-width="3" fill="#fff" stroke-linecap="round" stroke-linejoin="round">
+        <circle class="region" data-id="star1" cx="50" cy="50" r="6"/>
+        <circle class="region" data-id="star2" cx="350" cy="40" r="6"/>
+        <circle class="region" data-id="star3" cx="90" cy="200" r="6"/>
+        <circle class="region" data-id="star4" cx="330" cy="220" r="6"/>
+        <circle class="region" data-id="planet" cx="320" cy="120" r="26"/>
+        <ellipse class="region" data-id="ring" cx="320" cy="120" rx="40" ry="8" fill="#fff"/>
+        <path class="region" data-id="rocketBody" d="M180 70 q20 -30 40 0 v140 h-40 z"/>
+        <path class="region" data-id="rocketTip" d="M180 70 q20 -50 40 0 z"/>
+        <polygon class="region" data-id="finL" points="180,180 160,220 180,210"/>
+        <polygon class="region" data-id="finR" points="220,180 240,220 220,210"/>
+        <circle class="region" data-id="window" cx="200" cy="120" r="14"/>
+        <path class="region" data-id="flame" d="M180 210 q20 30 40 0 q-10 30 -20 30 q-10 0 -20 -30z"/>
+      </g>
+    </svg>`,
+    suggested:{sky:'#0d1b2a', star1:'#ffd54a',star2:'#ffd54a',star3:'#ffd54a',star4:'#ffd54a',
+      planet:'#ff7eb4',ring:'#ffd54a',rocketBody:'#ffffff',rocketTip:'#e63946',
+      finL:'#e63946',finR:'#e63946',window:'#3aa6ff',flame:'#f07b3f'}
+  },
+  {
+    id:'forest', title:'Friendly Forest',
+    svg:`<svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+      <rect class="region" data-id="sky" x="0" y="0" width="400" height="170" fill="#fff"/>
+      <rect class="region" data-id="ground" x="0" y="170" width="400" height="130" fill="#fff"/>
+      <g stroke="#222" stroke-width="3" fill="#fff" stroke-linecap="round" stroke-linejoin="round">
+        <polygon class="region" data-id="tree1" points="60,60 100,170 20,170"/>
+        <rect class="region" data-id="trunk1" x="54" y="170" width="12" height="22"/>
+        <polygon class="region" data-id="tree2" points="180,30 230,170 130,170"/>
+        <rect class="region" data-id="trunk2" x="176" y="170" width="14" height="22"/>
+        <polygon class="region" data-id="tree3" points="320,70 360,170 280,170"/>
+        <rect class="region" data-id="trunk3" x="314" y="170" width="12" height="22"/>
+        <ellipse class="region" data-id="mush" cx="100" cy="230" rx="22" ry="14"/>
+        <rect class="region" data-id="mushstem" x="92" y="230" width="14" height="28"/>
+        <circle class="region" data-id="foxBody" cx="220" cy="240" r="22"/>
+        <circle class="region" data-id="foxHead" cx="250" cy="220" r="14"/>
+        <polygon class="region" data-id="foxEar" points="240,205 255,210 246,195"/>
+        <polygon class="region" data-id="foxTail" points="200,240 180,235 205,225"/>
+        <path class="region" data-id="river" d="M0 270 q100 -10 200 0 q100 10 200 0 v30 h-400 z"/>
+      </g>
+    </svg>`,
+    suggested:{sky:'#a8d8ff',ground:'#a4f0a4',tree1:'#48b06a',tree2:'#48b06a',tree3:'#48b06a',
+      trunk1:'#a76a3c',trunk2:'#a76a3c',trunk3:'#a76a3c',
+      mush:'#e63946',mushstem:'#ffffff',
+      foxBody:'#f07b3f',foxHead:'#f07b3f',foxEar:'#f07b3f',foxTail:'#ffffff',
+      river:'#3aa6ff'}
+  },
+  {
+    id:'sea', title:'Under the Sea',
+    svg:`<svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+      <rect class="region" data-id="water" x="0" y="0" width="400" height="300" fill="#fff"/>
+      <g stroke="#222" stroke-width="3" fill="#fff" stroke-linecap="round" stroke-linejoin="round">
+        <path class="region" data-id="fish1body" d="M120 130 q40 -30 80 0 q-40 30 -80 0z"/>
+        <polygon class="region" data-id="fish1tail" points="120,130 95,110 95,150"/>
+        <circle class="region" data-id="fish1eye" cx="180" cy="125" r="4"/>
+        <path class="region" data-id="fish2body" d="M240 200 q40 -25 70 0 q-40 25 -70 0z"/>
+        <polygon class="region" data-id="fish2tail" points="240,200 220,185 220,215"/>
+        <path class="region" data-id="jelly" d="M80 60 q30 -40 60 0 v10 q-30 -10 -60 0z"/>
+        <line x1="86" y1="70" x2="86" y2="110"/>
+        <line x1="100" y1="72" x2="100" y2="115"/>
+        <line x1="118" y1="72" x2="118" y2="112"/>
+        <path class="region" data-id="coral" d="M40 260 q-10 -40 10 -60 q15 30 25 0 q15 30 25 -10 q-5 50 5 70 z"/>
+        <polygon class="region" data-id="chestL" points="290,250 330,250 330,280 290,280"/>
+        <polygon class="region" data-id="chestT" points="290,235 330,235 340,255 280,255"/>
+        <circle class="region" data-id="bubble1" cx="200" cy="60" r="8"/>
+        <circle class="region" data-id="bubble2" cx="220" cy="40" r="5"/>
+        <circle class="region" data-id="bubble3" cx="240" cy="25" r="4"/>
+      </g>
+    </svg>`,
+    suggested:{water:'#3aa6ff',fish1body:'#ff7eb4',fish1tail:'#ff7eb4',fish1eye:'#2d2a26',
+      fish2body:'#ffd54a',fish2tail:'#ffd54a',jelly:'#9c64f2',
+      coral:'#e63946',chestL:'#a76a3c',chestT:'#ffd54a',
+      bubble1:'#ffffff',bubble2:'#ffffff',bubble3:'#ffffff'}
+  },
+  {
+    id:'birthday', title:'Birthday Party',
+    svg:`<svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+      <rect class="region" data-id="wall" x="0" y="0" width="400" height="220" fill="#fff"/>
+      <rect class="region" data-id="floor" x="0" y="220" width="400" height="80" fill="#fff"/>
+      <g stroke="#222" stroke-width="3" fill="#fff" stroke-linecap="round" stroke-linejoin="round">
+        <rect class="region" data-id="cakeBase" x="140" y="180" width="120" height="40"/>
+        <rect class="region" data-id="cakeMid" x="160" y="150" width="80" height="30"/>
+        <rect class="region" data-id="cakeTop" x="180" y="120" width="40" height="30"/>
+        <line x1="200" y1="120" x2="200" y2="100" stroke-width="4"/>
+        <path class="region" data-id="flame" d="M200 100 q-10 -10 0 -20 q10 10 0 20z"/>
+        <circle class="region" data-id="balloon1" cx="60" cy="80" r="22"/>
+        <line x1="60" y1="102" x2="60" y2="160" stroke-width="2"/>
+        <circle class="region" data-id="balloon2" cx="100" cy="60" r="20"/>
+        <line x1="100" y1="80" x2="100" y2="160" stroke-width="2"/>
+        <circle class="region" data-id="balloon3" cx="340" cy="70" r="22"/>
+        <line x1="340" y1="92" x2="340" y2="160" stroke-width="2"/>
+        <rect class="region" data-id="present" x="290" y="200" width="50" height="50"/>
+        <line x1="315" y1="200" x2="315" y2="250" stroke-width="4"/>
+        <line x1="290" y1="225" x2="340" y2="225" stroke-width="4"/>
+      </g>
+    </svg>`,
+    suggested:{wall:'#d6c0ff',floor:'#a76a3c',
+      cakeBase:'#ffd54a',cakeMid:'#ff7eb4',cakeTop:'#ffffff',flame:'#f07b3f',
+      balloon1:'#e63946',balloon2:'#3aa6ff',balloon3:'#48b06a',
+      present:'#9c64f2'}
+  },
+  {
+    id:'bed', title:'Cozy Bedroom',
+    svg:`<svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+      <rect class="region" data-id="wall" x="0" y="0" width="400" height="200" fill="#fff"/>
+      <rect class="region" data-id="floor" x="0" y="200" width="400" height="100" fill="#fff"/>
+      <g stroke="#222" stroke-width="3" fill="#fff" stroke-linecap="round" stroke-linejoin="round">
+        <rect class="region" data-id="bedFrame" x="80" y="210" width="220" height="50"/>
+        <rect class="region" data-id="mattress" x="80" y="180" width="220" height="30"/>
+        <rect class="region" data-id="pillow" x="90" y="150" width="70" height="40"/>
+        <rect class="region" data-id="blanket" x="160" y="170" width="140" height="40"/>
+        <path class="region" data-id="catBody" d="M170 170 q20 -20 50 0 q20 20 -10 30 q-30 5 -40 -30z"/>
+        <circle class="region" data-id="catHead" cx="200" cy="155" r="14"/>
+        <polygon class="region" data-id="catEar1" points="190,140 195,128 200,142"/>
+        <polygon class="region" data-id="catEar2" points="210,140 205,128 200,142"/>
+        <rect class="region" data-id="lampbase" x="320" y="200" width="20" height="40"/>
+        <polygon class="region" data-id="lampshade" points="310,200 350,200 360,160 300,160"/>
+        <rect class="region" data-id="book1" x="40" y="200" width="14" height="40"/>
+        <rect class="region" data-id="book2" x="56" y="190" width="14" height="50"/>
+        <rect class="region" data-id="book3" x="72" y="195" width="14" height="45"/>
+      </g>
+    </svg>`,
+    suggested:{wall:'#a8d8ff',floor:'#a76a3c',
+      bedFrame:'#a76a3c',mattress:'#ffffff',pillow:'#ff7eb4',blanket:'#9c64f2',
+      catBody:'#2d2a26',catHead:'#2d2a26',catEar1:'#2d2a26',catEar2:'#2d2a26',
+      lampbase:'#a76a3c',lampshade:'#ffd54a',book1:'#e63946',book2:'#48b06a',book3:'#3aa6ff'}
+  },
+  /* ---- Reef friends (Zeezix channel) ---- */
+  {
+    id:'zeezix', title:'Zeezix',
+    svg:`<svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+      <rect class="region" data-id="water" x="0" y="0" width="400" height="300" fill="#fff"/>
+      <g stroke="#222" stroke-width="3" fill="#fff" stroke-linecap="round" stroke-linejoin="round">
+        <path class="region" data-id="sand" d="M0 240 q100 -16 200 0 q100 16 200 0 v60 H0 z"/>
+        <path class="region" data-id="coral" d="M22 245 q-6 -40 10 -60 q8 24 20 4 q12 24 20 -8 q0 44 6 64 z"/>
+        <path class="region" data-id="weed" d="M340 245 q-16 -30 -4 -60 q6 -14 2 -30 q22 30 12 60 q-2 14 4 30 z"/>
+        <polygon class="region" data-id="tail" points="135,165 90,130 102,165 90,200"/>
+        <polygon class="region" data-id="finTop" points="178,110 203,74 228,112"/>
+        <circle class="region" data-id="body" cx="200" cy="170" r="68"/>
+        <ellipse class="region" data-id="belly" cx="200" cy="222" rx="34" ry="14"/>
+        <circle class="region" data-id="eyeL" cx="178" cy="150" r="16"/>
+        <circle class="region" data-id="eyeR" cx="224" cy="150" r="16"/>
+        <circle cx="181" cy="152" r="6" fill="#222" stroke="none"/>
+        <circle cx="227" cy="152" r="6" fill="#222" stroke="none"/>
+        <path d="M186 182 q14 12 28 0" fill="none"/>
+        <path d="M214 104 q10 -34 44 -28" fill="none" stroke-width="4"/>
+        <polygon class="region" data-id="star" points="268,42 273.3,54.7 287,55.8 276.6,64.8 279.8,78.2 268,71 256.2,78.2 259.4,64.8 249,55.8 262.7,54.7"/>
+        <circle class="region" data-id="bubble1" cx="110" cy="70" r="12"/>
+      </g>
+    </svg>`,
+    suggested:{water:'#a8d8ff',sand:'#ffd54a',coral:'#ff7eb4',weed:'#48b06a',
+      tail:'#9c64f2',finTop:'#d6c0ff',body:'#9c64f2',belly:'#ff7eb4',
+      eyeL:'#d6c0ff',eyeR:'#d6c0ff',star:'#ffd54a',bubble1:'#ffffff'}
+  },
+  {
+    id:'coral', title:'Coral the Clownfish',
+    svg:`<svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+      <rect class="region" data-id="water" x="0" y="0" width="400" height="300" fill="#fff"/>
+      <g stroke="#222" stroke-width="3" fill="#fff" stroke-linecap="round" stroke-linejoin="round">
+        <path class="region" data-id="sand" d="M0 240 q100 -16 200 0 q100 16 200 0 v60 H0 z"/>
+        <path class="region" data-id="anemone" d="M250 245 q-8 -50 10 -62 q4 26 14 4 q10 30 14 -6 q10 30 10 64 z"/>
+        <polygon class="region" data-id="tail" points="112,150 62,115 74,150 62,185"/>
+        <polygon class="region" data-id="finTop" points="160,106 185,66 212,110"/>
+        <ellipse class="region" data-id="body" cx="190" cy="150" rx="82" ry="52"/>
+        <path class="region" data-id="stripe1" d="M230 112 q-12 38 0 76 h16 q-12 -38 0 -76 z"/>
+        <path class="region" data-id="stripe2" d="M182 99 q-10 51 0 102 h18 q-10 -51 0 -102 z"/>
+        <path class="region" data-id="stripe3" d="M134 120 q-8 30 0 60 h16 q-8 -30 0 -60 z"/>
+        <ellipse class="region" data-id="finSide" cx="170" cy="172" rx="24" ry="12" transform="rotate(-20 170 172)"/>
+        <circle class="region" data-id="eye" cx="250" cy="138" r="12"/>
+        <circle cx="253" cy="140" r="4" fill="#222" stroke="none"/>
+        <path d="M246 162 q10 6 18 -2" fill="none"/>
+        <circle class="region" data-id="bubble1" cx="300" cy="70" r="12"/>
+      </g>
+    </svg>`,
+    suggested:{water:'#3aa6ff',sand:'#ffd54a',anemone:'#ff7eb4',
+      tail:'#f07b3f',finTop:'#f07b3f',body:'#f07b3f',finSide:'#f07b3f',
+      stripe1:'#ffffff',stripe2:'#ffffff',stripe3:'#ffffff',
+      eye:'#2d2a26',bubble1:'#ffffff'}
+  },
+  {
+    id:'lumi', title:'Lumi the Jellyfish',
+    svg:`<svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+      <rect class="region" data-id="water" x="0" y="0" width="400" height="300" fill="#fff"/>
+      <g stroke="#222" stroke-width="3" fill="#fff" stroke-linecap="round" stroke-linejoin="round">
+        <path class="region" data-id="sand" d="M0 252 q100 -14 200 0 q100 14 200 0 v48 H0 z"/>
+        <path class="region" data-id="tent1" d="M130 150 q-12 25 0 45 q-12 25 0 45 h14 q-12 -25 0 -45 q-12 -25 0 -45 z"/>
+        <path class="region" data-id="tent2" d="M170 150 q12 25 0 45 q12 25 0 45 h14 q12 -25 0 -45 q12 -25 0 -45 z"/>
+        <path class="region" data-id="tent3" d="M216 150 q-12 25 0 45 q-12 25 0 45 h14 q-12 -25 0 -45 q-12 -25 0 -45 z"/>
+        <path class="region" data-id="tent4" d="M256 150 q12 25 0 45 q12 25 0 45 h14 q12 -25 0 -45 q12 -25 0 -45 z"/>
+        <path class="region" data-id="bell" d="M110 150 Q200 -10 290 150 z"/>
+        <path class="region" data-id="frill" d="M110 150 q22 20 45 0 q22 20 45 0 q22 20 45 0 q22 20 45 0 v-14 H110 z"/>
+        <circle class="region" data-id="eyeL" cx="175" cy="110" r="12"/>
+        <circle class="region" data-id="eyeR" cx="225" cy="110" r="12"/>
+        <circle cx="178" cy="112" r="5" fill="#222" stroke="none"/>
+        <circle cx="228" cy="112" r="5" fill="#222" stroke="none"/>
+        <circle class="region" data-id="cheekL" cx="158" cy="128" r="7"/>
+        <circle class="region" data-id="cheekR" cx="242" cy="128" r="7"/>
+        <path d="M188 128 q12 10 24 0" fill="none"/>
+      </g>
+    </svg>`,
+    suggested:{water:'#3aa6ff',sand:'#ffd54a',
+      tent1:'#d6c0ff',tent2:'#ff7eb4',tent3:'#d6c0ff',tent4:'#ff7eb4',
+      bell:'#d6c0ff',frill:'#ff7eb4',eyeL:'#a8d8ff',eyeR:'#a8d8ff',cheekL:'#ff7eb4',cheekR:'#ff7eb4'}
+  },
+];
+
+/* ---------- State (Playables saveData + localStorage fallback) ---------- */
+let save = {fills:{}, done:[], palette:'base'};
+function persist(){ YTGame.saveData(save); }
+async function bootSave(){
+  save = await YTGame.loadData({fills:{}, done:[], palette:'base'});
+  if(!save.fills) save.fills = {};
+  if(!save.done) save.done = [];
+  if(!save.palette) save.palette = 'base';
+}
+
+let currentScene = null; // scene object
+let currentColor = '#e63946';
+let history = []; // [{el, id, prev, prevPainted}]
+let winArmed = true; // the "Ta-da!" fires once per completion, not on every later tap
+
+/* ---------- Audio ---------- */
+let audioCtx=null, muted=false;
+function ensureAudio(){
+  if(!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+}
+function blip(freq,dur,type='sine',vol=0.18){
+  if(!audioCtx||muted) return;
+  const t=audioCtx.currentTime;
+  const o=audioCtx.createOscillator(); const g=audioCtx.createGain();
+  o.type=type; o.frequency.value=freq;
+  g.gain.setValueAtTime(vol,t);
+  g.gain.exponentialRampToValueAtTime(0.001,t+dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(t); o.stop(t+dur);
+}
+function fillSound(){ blip(560,0.12,'sine',0.18); blip(720,0.10,'sine',0.10); }
+function swatchSound(){ blip(880,0.08,'triangle',0.16); }
+function undoSound(){ blip(360,0.16,'sawtooth',0.12); }
+function winFanfare(){ [523,659,784,1046,1318].forEach((f,i)=>setTimeout(()=>blip(f,0.18,'triangle',0.2),i*120)); }
+document.addEventListener('pointerdown', ()=>{ ensureAudio(); if(audioCtx && audioCtx.state==='suspended') audioCtx.resume(); }, {once:true});
+
+const muteBtn = document.getElementById('muteBtn');
+muteBtn.addEventListener('click', ()=>{ muted=!muted; muteBtn.textContent=muted?'🔇':'🔊'; });
+
+/* Respect YouTube audio settings */
+muted = !YTGame.initialAudioEnabled();
+muteBtn.textContent = muted ? '🔇' : '🔊';
+YTGame.onAudioChange((enabled)=>{ muted = !enabled; muteBtn.textContent = muted ? '🔇' : '🔊'; });
+
+/* Pause / Resume — coloring is mostly idle; we just persist on pause */
+YTGame.onPause(()=>{ try{ persist(); }catch(e){} });
+YTGame.onResume(()=>{});
+
+/* ---------- Toast ---------- */
+const toast = document.getElementById('toast');
+function showToast(msg, ms=1400){
+  toast.textContent = msg; toast.classList.add('show');
+  clearTimeout(showToast._t); showToast._t = setTimeout(()=>toast.classList.remove('show'), ms);
+}
+
+/* ---------- Build palette UI ---------- */
+function paletteColors(){
+  if(save.palette==='cosmic' && save.done.length>=3) return COSMIC;
+  if(save.palette==='sparkle' && save.done.length>=6) return SPARKLE;
+  return BASE;
+}
+function renderPalette(){
+  const pal = document.getElementById('palette'); pal.innerHTML='';
+  paletteColors().forEach((c,i)=>{
+    const s = document.createElement('button');
+    s.className='swatch' + (c===currentColor?' selected':'');
+    s.style.background = c;
+    s.setAttribute('aria-label','Color '+(i+1));
+    s.addEventListener('click', ()=>{ currentColor=c; swatchSound(); renderPalette(); });
+    pal.appendChild(s);
+  });
+  // unlockable indicators
+  if(save.done.length>=3 && save.palette!=='cosmic'){
+    const btn = document.createElement('button');
+    btn.className='swatch'; btn.style.background='linear-gradient(135deg,#0d1b2a,#9c64f2)';
+    btn.title='Unlock Cosmic palette';
+    btn.addEventListener('click', ()=>{ save.palette='cosmic'; persist(); renderPalette(); showToast('🌌 Cosmic palette!'); });
+    pal.appendChild(btn);
+  }
+  if(save.done.length>=6 && save.palette!=='sparkle'){
+    const btn = document.createElement('button');
+    btn.className='swatch'; btn.style.background='linear-gradient(135deg,#ffd54a,#ff7eb4,#3aa6ff)';
+    btn.title='Unlock Sparkle palette';
+    btn.addEventListener('click', ()=>{ save.palette='sparkle'; persist(); renderPalette(); showToast('✨ Sparkle palette!'); });
+    pal.appendChild(btn);
+  }
+}
+
+/* ---------- Render scene ---------- */
+function renderScene(sceneId){
+  const sc = SCENES.find(s=>s.id===sceneId); if(!sc) return;
+  currentScene = sc;
+  document.getElementById('sceneTitle').textContent = sc.title;
+  document.getElementById('homeOverlay').style.display='none';
+  document.getElementById('winOverlay').style.display='none';
+  const stage = document.getElementById('stage');
+  stage.innerHTML = sc.svg;
+  const sceneFills = (save.fills[sc.id] = save.fills[sc.id] || {});
+  history = [];
+  const svg = stage.querySelector('svg');
+  svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+  svg.querySelectorAll('.region').forEach(node=>{
+    const id = node.dataset.id;
+    // data-painted marks a region the kid has tapped, so painting with the white swatch counts too
+    if(sceneFills[id]){ node.setAttribute('fill', sceneFills[id]); node.dataset.painted = '1'; }
+    node.addEventListener('click', ()=>{
+      const prev = node.getAttribute('fill');
+      const prevPainted = node.dataset.painted === '1';
+      if(prevPainted && prev === currentColor) return;
+      history.push({el:node, id, prev, prevPainted});
+      node.setAttribute('fill', currentColor);
+      node.dataset.painted = '1';
+      sceneFills[id] = currentColor;
+      persist();
+      fillSound();
+      checkComplete();
+    });
+  });
+  winArmed = !isComplete();
+  renderPalette();
+}
+
+function isComplete(){
+  const stage = document.getElementById('stage');
+  const all = stage.querySelectorAll('.region');
+  if(!all.length) return false;
+  for(const n of all){ if(n.dataset.painted !== '1') return false; }
+  return true;
+}
+function checkComplete(){
+  const sc = currentScene; if(!sc || !winArmed) return;
+  // every region must have been painted (any color, white included)
+  if(isComplete()){
+    winArmed = false;
+    setTimeout(()=>triggerWin(), 200);
+  }
+}
+
+function triggerWin(){
+  const sc = currentScene; if(!sc) return;
+  if(!save.done.includes(sc.id)) save.done.push(sc.id);
+  persist();
+  YTGame.sendScore(save.done.length);
+  winFanfare();
+  fireConfetti();
+  // preview
+  const stage = document.getElementById('stage');
+  const winPrev = document.getElementById('winPreview');
+  winPrev.innerHTML = stage.innerHTML;
+  // animate the scene briefly: simple celebrate wiggle
+  const svg = stage.querySelector('svg');
+  if(svg){
+    svg.animate([{transform:'rotate(0deg)'},{transform:'rotate(-2deg)'},{transform:'rotate(2deg)'},{transform:'rotate(0deg)'}], {duration:600, iterations:2});
+  }
+  setTimeout(()=>{ document.getElementById('winOverlay').style.display='flex'; }, 700);
+}
+
+/* ---------- Confetti ---------- */
+const cf = document.getElementById('confetti');
+const cfctx = cf.getContext('2d');
+function sizeConfetti(){ cf.width = window.innerWidth; cf.height = window.innerHeight; }
+window.addEventListener('resize', sizeConfetti); sizeConfetti();
+let confettiParts = [];
+function fireConfetti(){
+  confettiParts = [];
+  for(let i=0;i<140;i++){
+    confettiParts.push({
+      x: window.innerWidth/2 + (Math.random()-0.5)*60,
+      y: window.innerHeight/2,
+      vx:(Math.random()-0.5)*600, vy:-Math.random()*700-200,
+      r: 4+Math.random()*5, color:`hsl(${Math.random()*360},90%,60%)`, life:1.6
+    });
+  }
+}
+let cfLast = performance.now();
+function cfLoop(now){
+  const dt = Math.min(0.04,(now-cfLast)/1000); cfLast=now;
+  cfctx.clearRect(0,0,cf.width,cf.height);
+  confettiParts.forEach(p=>{
+    p.x += p.vx*dt; p.y += p.vy*dt; p.vy += 1200*dt; p.life -= dt*0.6;
+    cfctx.globalAlpha = Math.max(0,p.life);
+    cfctx.fillStyle = p.color;
+    cfctx.fillRect(p.x, p.y, p.r, p.r);
+  });
+  cfctx.globalAlpha = 1;
+  confettiParts = confettiParts.filter(p=>p.life>0);
+  requestAnimationFrame(cfLoop);
+}
+requestAnimationFrame(cfLoop);
+
+/* ---------- Buttons ---------- */
+// All Home affordances go to the Zeezix launcher in one tap
+function goToLauncher(){ window.location.href = 'index.html'; }
+document.getElementById('homeBtn').addEventListener('click', goToLauncher);     // header 🎪
+document.getElementById('winHomeBtn').addEventListener('click', goToLauncher);  // win-overlay 🏠 Home
+
+// Parent-gated reset — wipes Magic Coloring Book progress only
+function resetThisGame(){
+  const a = 3 + Math.floor(Math.random()*7);
+  const b = 3 + Math.floor(Math.random()*7);
+  const answer = prompt('Parent gate — what is ' + a + ' × ' + b + '?');
+  if(answer === null) return;
+  if(parseInt(answer,10) !== a*b){ alert('That’s not quite right — nothing was changed.'); return; }
+  if(!confirm('Reset Magic Coloring Book progress (all scenes and palette unlocks)?')) return;
+  try { localStorage.removeItem('coloring_book_v1'); } catch(e){}
+  save = {fills:{}, done:[], palette:'base'};
+  persist();
+  goHome();
+  alert('Magic Coloring Book reset. Pick a scene to start fresh!');
+}
+const resetLink = document.getElementById('resetThisGame');
+if(resetLink) resetLink.addEventListener('click', resetThisGame);
+
+// "Clear page" button — wipes the current scene's fills (kid-discoverable, no gate)
+function clearCurrentScene(){
+  if(!currentScene) return;
+  if(!confirm('Clear all colors on this picture?')) return;
+  save.fills[currentScene.id] = {};
+  persist();
+  renderScene(currentScene.id);
+}
+const clearBtn = document.getElementById('clearSceneBtn');
+if(clearBtn) clearBtn.addEventListener('click', clearCurrentScene);
+document.getElementById('nextSceneBtn').addEventListener('click', ()=>{
+  const idx = SCENES.findIndex(s=>s.id===currentScene.id);
+  const next = SCENES[(idx+1)%SCENES.length];
+  renderScene(next.id);
+});
+document.getElementById('undoBtn').addEventListener('click', ()=>{
+  const last = history.pop(); if(!last) return;
+  last.el.setAttribute('fill', last.prev || '#ffffff');
+  if(last.prevPainted) last.el.dataset.painted = '1'; else delete last.el.dataset.painted;
+  if(currentScene){
+    const fills = (save.fills[currentScene.id] = save.fills[currentScene.id] || {});
+    if(last.prevPainted && last.prev){ fills[last.id] = last.prev; }
+    else delete fills[last.id];
+    persist();
+    if(!isComplete()) winArmed = true;
+  }
+  undoSound();
+});
+function downloadCurrent(){
+  const stage = document.getElementById('stage');
+  const svgEl = stage.querySelector('svg'); if(!svgEl) return;
+  const serializer = new XMLSerializer();
+  const svgStr = serializer.serializeToString(svgEl);
+  const blob = new Blob([svgStr], {type:'image/svg+xml'});
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.onload = ()=>{
+    const c = document.createElement('canvas');
+    c.width = 1200; c.height = 900;
+    const cx = c.getContext('2d');
+    cx.fillStyle = '#fff8e7'; cx.fillRect(0,0,c.width,c.height);
+    cx.drawImage(img, 0,0, c.width, c.height);
+    c.toBlob(b=>{
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(b);
+      a.download = (currentScene?currentScene.id:'coloring') + '.png';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }, 'image/png');
+    URL.revokeObjectURL(url);
+  };
+  img.src = url;
+}
+document.getElementById('saveBtn').addEventListener('click', downloadCurrent);
+document.getElementById('saveWinBtn').addEventListener('click', downloadCurrent);
+
+window.addEventListener('keydown', e=>{
+  if(e.key>='1' && e.key<='9'){
+    const i = parseInt(e.key,10)-1;
+    const pal = paletteColors();
+    if(i<pal.length){ currentColor=pal[i]; swatchSound(); renderPalette(); }
+  } else if(e.key==='z' || e.key==='Z'){
+    document.getElementById('undoBtn').click();
+  } else if(e.key==='Escape'){
+    goHome();
+  }
+});
+
+/* ---------- Home ---------- */
+function thumbForScene(s){
+  // small preview svg
+  const fills = save.fills[s.id] || {};
+  const stage = document.createElement('div'); stage.innerHTML = s.svg;
+  const svg = stage.querySelector('svg');
+  svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+  svg.querySelectorAll('.region').forEach(n=>{
+    const id = n.dataset.id;
+    if(fills[id]) n.setAttribute('fill', fills[id]);
+  });
+  return stage.innerHTML;
+}
+function renderHome(){
+  document.getElementById('homeOverlay').style.display='flex';
+  document.getElementById('winOverlay').style.display='none';
+  const grid = document.getElementById('sceneGrid'); grid.innerHTML='';
+  SCENES.forEach(s=>{
+    const card = document.createElement('button');
+    card.className = 'scene-card' + (save.done.includes(s.id)?' done':'');
+    card.innerHTML = thumbForScene(s) + `<div class="title">${s.title}</div>`;
+    card.addEventListener('click', ()=>{
+      ensureAudio(); if(audioCtx && audioCtx.state==='suspended') audioCtx.resume();
+      renderScene(s.id);
+    });
+    grid.appendChild(card);
+  });
+  document.getElementById('doneCount').textContent = save.done.length;
+  document.getElementById('totalCount').textContent = SCENES.length;
+  document.getElementById('sceneTitle').textContent = 'Magic Coloring Book';
+}
+function goHome(){ currentScene=null; renderHome(); }
+
+/* Boot */
+(async function boot(){
+  await bootSave();
+  goHome();
+  requestAnimationFrame(()=>{
+    YTGame.firstFrameReady();
+    YTGame.gameReady();
+    // Send score = scenes completed (a simple progress score)
+    YTGame.sendScore(save.done.length);
+  });
+})();
+</script>
+</body>
+</html>

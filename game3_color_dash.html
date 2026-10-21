@@ -1,0 +1,768 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+<title>Color Dash</title>
+<!-- YouTube Playables SDK (loaded before game code; bridge no-ops if absent). -->
+<script src="https://www.youtube.com/game_api/v1" onerror="window.__ytGameLoadFailed=true"></script>
+<style>
+  html,body{margin:0;padding:0;background:#2a2f5b;overflow:hidden;
+    font-family:system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+    user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;
+    touch-action:none;color:#fff;height:100%;min-height:100svh;width:100%;}
+  body{height:100svh;}
+  canvas{display:block;background:#2a2f5b;position:fixed;top:0;left:0;}
+  #homeFab{position:fixed;top:calc(8px + env(safe-area-inset-top,0));left:8px;width:42px;height:42px;border-radius:999px;
+    background:rgba(255,255,255,.92);color:#222;border:none;font-size:18px;cursor:pointer;z-index:15;
+    box-shadow:0 2px 0 rgba(0,0,0,.25);}
+  #homeFab:active{transform:translateY(2px);box-shadow:0 0 0 rgba(0,0,0,.25);}
+  /* HUD sits in the top row between the two round buttons, above the painting panel (no overlap). */
+  .hud{position:fixed;top:calc(14px + env(safe-area-inset-top,0));left:58px;right:58px;display:flex;justify-content:space-between;
+    font-weight:800;font-size:16px;z-index:5;pointer-events:none;}
+  .pill{background:rgba(0,0,0,.4);padding:6px 12px;border-radius:999px;}
+  #muteBtn{position:fixed;top:calc(8px + env(safe-area-inset-top,0));right:8px;width:42px;height:42px;border-radius:999px;background:rgba(255,255,255,.9);color:#222;border:none;font-size:18px;cursor:pointer;z-index:15;box-shadow:0 2px 0 rgba(0,0,0,.25);}
+  /* Overlays center short content but scroll when the picture grid is taller than a phone screen. */
+  .overlay{position:fixed;inset:0;background:rgba(20,22,40,.92);display:flex;flex-direction:column;
+    align-items:center;justify-content:flex-start;z-index:20;text-align:center;padding:18px;
+    box-sizing:border-box;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+  .overlay::before,.overlay::after{content:"";display:block;margin:auto;flex:0 0 0px;}
+  .overlay > *{flex-shrink:0;}
+  .overlay h1{font-size:38px;margin:0 0 4px;text-shadow:0 4px 0 rgba(0,0,0,.4);}
+  .overlay p{margin:6px 0 16px;opacity:.9;}
+  .big{font-size:24px;background:#ff7eb4;border:none;color:#fff;border-radius:999px;padding:16px 28px;font-weight:900;cursor:pointer;box-shadow:0 5px 0 rgba(0,0,0,.3);}
+  .big:active{transform:translateY(2px);box-shadow:0 3px 0 rgba(0,0,0,.3);}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;max-width:600px;width:100%;}
+  .pic-card{background:#fff;border-radius:16px;padding:8px;cursor:pointer;box-shadow:0 4px 0 rgba(0,0,0,.25);position:relative;}
+  .pic-card svg{width:100%;height:100px;}
+  .pic-card .title{font-size:12px;font-weight:700;color:#2a2f5b;text-align:center;margin-top:4px;}
+  .pic-card.done::after{content:"✓";position:absolute;top:6px;right:8px;background:#48b06a;color:#fff;border-radius:999px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;}
+  .small{background:rgba(255,255,255,.9);color:#2a2f5b;border:none;border-radius:999px;padding:10px 16px;font-weight:700;cursor:pointer;}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.7);color:#fff;padding:8px 16px;border-radius:999px;font-weight:700;opacity:0;transition:opacity .3s;z-index:30;}
+  .toast.show{opacity:1;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<button id="homeFab" aria-label="All games (Zeezix)">⭐</button>
+
+<div class="hud">
+  <div class="pill">🎨 <span id="filled">0</span>/<span id="total">0</span></div>
+  <div class="pill">🟤 <span id="mud">0</span></div>
+</div>
+<button id="muteBtn">🔊</button>
+
+<div id="homeOverlay" class="overlay">
+  <h1>🎨 Color Dash</h1>
+  <p>Run to collect color drops and paint the picture!</p>
+  <div class="grid" id="picGrid"></div>
+  <p style="font-size:13px;opacity:.7;margin-top:14px">Paintings done: <span id="doneCount">0</span> / <span id="totalCount">8</span></p>
+  <button id="resetThisGame" style="margin-top:6px;background:transparent;border:none;color:rgba(255,255,255,.55);font-size:11px;text-decoration:underline;cursor:pointer;padding:6px 10px;">⚙ Parents: reset this game</button>
+</div>
+
+<div id="endOverlay" class="overlay" style="display:none">
+  <h1>🎉 You painted it!</h1>
+  <div id="endPreview" style="background:#fff;color:#222;border-radius:16px;padding:8px;width:min(80vw,360px);height:220px;margin-bottom:12px;"></div>
+  <p>Mud splats: <span id="endMud">0</span></p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
+    <button class="big" id="nextBtn">▶ Next picture</button>
+    <button class="small" id="homeBtn">🏠 Home</button>
+  </div>
+</div>
+
+<div id="failOverlay" class="overlay" style="display:none">
+  <h1>Almost! 🌟</h1>
+  <p>The picture isn't quite finished. Want to try again?</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
+    <button class="big" id="retryBtn">↺ Try Again</button>
+    <button class="small" id="failHomeBtn">🏠 Home</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =================================================================
+   Color Dash — runner + paint hybrid, single-file Playable.
+   - 3 lanes, jump only.
+   - Color drops fill the picture at the top.
+   - Mud splats undo the last region (soft fail).
+   - Picture complete -> win.
+   - Mud-hit cap (10) -> retry screen.
+   ================================================================= */
+
+/* ----------- YouTube Playables SDK Bridge ----------- */
+const SAVE_FALLBACK_KEY = 'color_dash_v1';
+const YTGame = (() => {
+  const hasSdk = typeof ytgame !== 'undefined';
+  const inPlayables = hasSdk && !!ytgame.IN_PLAYABLES_ENV;
+  const safe = (fn) => { try { return fn(); } catch(e){ return undefined; } };
+  return {
+    hasSdk, inPlayables,
+    firstFrameReady(){ if(hasSdk) safe(()=>ytgame.game.firstFrameReady()); },
+    gameReady(){ if(hasSdk) safe(()=>ytgame.game.gameReady()); },
+    saveData(obj){
+      const s = JSON.stringify(obj);
+      if(inPlayables) safe(()=>ytgame.game.saveData(s));
+      try{ localStorage.setItem(SAVE_FALLBACK_KEY, s); }catch(e){}
+    },
+    async loadData(fallback){
+      if(inPlayables){ try{ const s = await ytgame.game.loadData(); if(s) return JSON.parse(s); }catch(e){} }
+      try{ const s = localStorage.getItem(SAVE_FALLBACK_KEY); if(s) return JSON.parse(s); }catch(e){}
+      return fallback;
+    },
+    sendScore(value){
+      if(inPlayables && typeof value === 'number' && isFinite(value))
+        safe(()=>ytgame.engagement.sendScore({value: Math.floor(value)}));
+    },
+    onPause(cb){
+      if(hasSdk) safe(()=>ytgame.system.onPause(cb));
+      window.addEventListener('blur', cb);
+      document.addEventListener('visibilitychange', ()=>{ if(document.hidden) cb(); });
+    },
+    onResume(cb){
+      if(hasSdk) safe(()=>ytgame.system.onResume(cb));
+      window.addEventListener('focus', cb);
+      document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) cb(); });
+    },
+    initialAudioEnabled(){
+      if(hasSdk){ const v = safe(()=>ytgame.system.isAudioEnabled()); if(typeof v === 'boolean') return v; }
+      return true;
+    },
+    onAudioChange(cb){ if(hasSdk) safe(()=>ytgame.system.onAudioEnabledChange(cb)); },
+    logError(msg){ if(hasSdk) safe(()=>ytgame.health.logError()); if(msg) console.warn('[colordash]', msg); },
+  };
+})();
+window.addEventListener('error', e => YTGame.logError(e && e.message));
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W=0,H=0,DPR=Math.min(window.devicePixelRatio||1,2);
+function resize(){
+  const vv = window.visualViewport;
+  W = window.innerWidth;
+  H = vv ? Math.round(vv.height) : window.innerHeight;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  canvas.width = W*DPR; canvas.height = H*DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  // Reposition robot so it stays visible when iOS toolbar appears/hides.
+  // Wrapped in try/catch — first resize() runs at script load before `let player`
+  // exists (TDZ — `typeof` on a `let` throws ReferenceError, unlike `var`).
+  try {
+    if (typeof player === 'object' && player) {
+      player.y = H * 0.78;
+      if (typeof targetLane === 'number') player.x = (W/2) + (targetLane - 1) * (W*0.22);
+    }
+  } catch (e) { /* player not yet declared on first resize() — fine */ }
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', resize);
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize', resize);
+  window.visualViewport.addEventListener('scroll', resize);
+}
+resize();
+
+/* ---------- Audio ---------- */
+let audioCtx=null, muted=false;
+function ensureAudio(){ if(!audioCtx){ try{audioCtx=new(window.AudioContext||window.webkitAudioContext)();}catch(e){} } }
+function blip(freq,dur,type='sine',vol=0.18){
+  if(!audioCtx||muted) return;
+  const t=audioCtx.currentTime; const o=audioCtx.createOscillator(); const g=audioCtx.createGain();
+  o.type=type; o.frequency.value=freq;
+  g.gain.setValueAtTime(vol,t);
+  g.gain.exponentialRampToValueAtTime(0.001,t+dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(t); o.stop(t+dur);
+}
+function dropSound(color){
+  // pitch maps to hue brightness
+  const c = parseColor(color);
+  const lum = (c.r+c.g+c.b)/3;
+  const f = 300 + lum*4;
+  blip(f, 0.12, 'sine', 0.18);
+  blip(f*1.5, 0.08, 'sine', 0.10);
+}
+function mudSound(){ blip(180,0.20,'sawtooth',0.18); blip(140,0.18,'sawtooth',0.14); }
+function fillRegionSound(){ blip(660,0.12,'triangle',0.18); blip(880,0.10,'triangle',0.12); }
+function jumpSound(){ blip(520,0.10,'square',0.14); }
+function winFanfare(){ [523,659,784,1046,1318,1568].forEach((f,i)=>setTimeout(()=>blip(f,0.18,'triangle',0.2),i*110)); }
+document.addEventListener('pointerdown', ()=>{ ensureAudio(); if(audioCtx&&audioCtx.state==='suspended') audioCtx.resume(); },{once:true});
+
+const muteBtn = document.getElementById('muteBtn');
+muteBtn.addEventListener('click', ()=>{ muted=!muted; muteBtn.textContent=muted?'🔇':'🔊'; });
+muted = !YTGame.initialAudioEnabled();
+muteBtn.textContent = muted ? '🔇' : '🔊';
+YTGame.onAudioChange((enabled)=>{ muted = !enabled; muteBtn.textContent = muted ? '🔇' : '🔊'; });
+
+/* ---------- Storage (Playables saveData + localStorage fallback) ---------- */
+let save = {done:[]};
+function persist(){ YTGame.saveData(save); }
+async function bootSave(){
+  save = await YTGame.loadData({done:[]});
+  if(!save.done) save.done = [];
+}
+
+/* ---------- Pictures (inline SVG, regions per color) ---------- */
+/* Each picture: regions array, each region has id, color (the target color), and svg path string */
+const PICTURES = [
+  {
+    id:'sunflower', title:'Sunflower',
+    viewBox:'0 0 200 150',
+    regions:[
+      {id:'sky', color:'#a8d8ff', d:'M0 0 H200 V90 H0 Z'},
+      {id:'ground', color:'#48b06a', d:'M0 90 H200 V150 H0 Z'},
+      {id:'center', color:'#a76a3c', d:'M100 70 m-14 0 a14 14 0 1 0 28 0 a14 14 0 1 0 -28 0 Z'},
+      {id:'petals', color:'#ffd54a', d:'M100 36 a10 14 0 0 1 0 28 a10 14 0 0 1 0 -28 Z M134 70 a14 10 0 0 1 -28 0 a14 10 0 0 1 28 0 Z M100 104 a10 14 0 0 1 0 -28 a10 14 0 0 1 0 28 Z M66 70 a14 10 0 0 1 28 0 a14 10 0 0 1 -28 0 Z M124 46 a12 12 0 0 1 -22 22 a12 12 0 0 1 22 -22 Z M76 46 a12 12 0 0 1 22 22 a12 12 0 0 1 -22 -22 Z'},
+      {id:'stem', color:'#48b06a', d:'M96 84 H104 V130 H96 Z'},
+      {id:'leaf', color:'#48b06a', d:'M104 110 q20 -10 28 6 q-18 8 -28 -6 Z'},
+    ]
+  },
+  {
+    id:'dino', title:'Friendly Dinosaur',
+    viewBox:'0 0 220 150',
+    regions:[
+      {id:'sky', color:'#a8d8ff', d:'M0 0 H220 V90 H0 Z'},
+      {id:'ground', color:'#a4f0a4', d:'M0 90 H220 V150 H0 Z'},
+      {id:'body', color:'#48b06a', d:'M40 100 q20 -50 80 -50 q60 0 80 50 q-10 30 -50 30 H90 q-40 0 -50 -30 Z'},
+      {id:'belly', color:'#a4f0a4', d:'M70 110 q40 20 80 0 q-10 20 -40 20 q-30 0 -40 -20 Z'},
+      {id:'spikes', color:'#f07b3f', d:'M80 60 l8 -10 l8 10 Z M110 50 l8 -10 l8 10 Z M140 55 l8 -10 l8 10 Z'},
+      {id:'eye', color:'#ffffff', d:'M165 70 m-6 0 a6 6 0 1 0 12 0 a6 6 0 1 0 -12 0 Z'},
+      {id:'foot1', color:'#48b06a', d:'M70 130 h18 v10 h-18 Z'},
+      {id:'foot2', color:'#48b06a', d:'M132 130 h18 v10 h-18 Z'},
+    ]
+  },
+  {
+    id:'rocket', title:'Rocket to the Moon',
+    viewBox:'0 0 200 150',
+    regions:[
+      {id:'sky', color:'#0d1b2a', d:'M0 0 H200 V150 H0 Z'},
+      {id:'star1', color:'#ffd54a', d:'M30 30 m-4 0 a4 4 0 1 0 8 0 a4 4 0 1 0 -8 0 Z'},
+      {id:'star2', color:'#ffd54a', d:'M170 25 m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0 Z'},
+      {id:'moon', color:'#ffffff', d:'M160 60 m-16 0 a16 16 0 1 0 32 0 a16 16 0 1 0 -32 0 Z'},
+      {id:'rocket', color:'#e63946', d:'M90 40 q10 -20 20 0 v60 h-20 Z'},
+      {id:'window', color:'#3aa6ff', d:'M100 60 m-6 0 a6 6 0 1 0 12 0 a6 6 0 1 0 -12 0 Z'},
+      {id:'fin', color:'#f07b3f', d:'M90 90 l-10 20 l10 -5 Z M110 90 l10 20 l-10 -5 Z'},
+      {id:'flame', color:'#ffd54a', d:'M90 100 q10 30 20 0 q-5 25 -10 25 q-5 0 -10 -25 Z'},
+    ]
+  },
+  {
+    id:'cupcake', title:'Birthday Cupcake',
+    viewBox:'0 0 200 150',
+    regions:[
+      {id:'sky', color:'#d6c0ff', d:'M0 0 H200 V150 H0 Z'},
+      {id:'wrapper', color:'#9c64f2', d:'M70 80 L80 130 H120 L130 80 Z'},
+      {id:'frosting', color:'#ff7eb4', d:'M60 80 q40 -50 80 0 Z'},
+      {id:'cherry', color:'#e63946', d:'M100 30 m-8 0 a8 8 0 1 0 16 0 a8 8 0 1 0 -16 0 Z'},
+      {id:'candle', color:'#ffffff', d:'M97 16 h6 v14 h-6 Z'},
+      {id:'flame', color:'#f07b3f', d:'M100 12 q-4 -6 0 -10 q4 6 0 10 Z'},
+      {id:'sprinkle', color:'#ffd54a', d:'M80 70 h4 v4 h-4 Z M120 65 h4 v4 h-4 Z M95 60 h4 v4 h-4 Z'},
+    ]
+  },
+  {
+    id:'cat', title:'Sleepy Cat',
+    viewBox:'0 0 200 150',
+    regions:[
+      {id:'sky', color:'#a8d8ff', d:'M0 0 H200 V90 H0 Z'},
+      {id:'floor', color:'#a76a3c', d:'M0 90 H200 V150 H0 Z'},
+      {id:'pillow', color:'#ff7eb4', d:'M40 95 q60 -20 120 0 q10 20 -10 30 H50 q-20 -10 -10 -30 Z'},
+      {id:'body', color:'#2d2a26', d:'M70 100 q30 -25 60 0 q15 25 -10 30 H80 q-25 -5 -10 -30 Z'},
+      {id:'head', color:'#2d2a26', d:'M75 95 m-12 0 a12 12 0 1 0 24 0 a12 12 0 1 0 -24 0 Z'},
+      {id:'ear1', color:'#2d2a26', d:'M67 80 l-2 -10 l8 6 Z'},
+      {id:'ear2', color:'#2d2a26', d:'M83 80 l2 -10 l-8 6 Z'},
+      {id:'tail', color:'#2d2a26', d:'M130 110 q20 -20 30 -5 q-10 5 -20 10 Z'},
+      {id:'cheek', color:'#ff7eb4', d:'M70 100 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0 Z'},
+    ]
+  },
+  {
+    id:'rainbow', title:'Smiley Rainbow',
+    viewBox:'0 0 200 150',
+    regions:[
+      {id:'sky', color:'#a8d8ff', d:'M0 0 H200 V150 H0 Z'},
+      {id:'band1', color:'#e63946', d:'M30 130 a70 70 0 0 1 140 0 v-10 a60 60 0 0 0 -120 0 Z'},
+      {id:'band2', color:'#f07b3f', d:'M50 130 a50 50 0 0 1 100 0 v-10 a40 40 0 0 0 -80 0 Z'},
+      {id:'band3', color:'#ffd54a', d:'M70 130 a30 30 0 0 1 60 0 v-10 a20 20 0 0 0 -40 0 Z'},
+      {id:'cloudL', color:'#ffffff', d:'M20 130 q-5 -25 15 -25 q5 -10 18 -5 q5 -10 20 0 q5 -5 10 5 q5 25 -10 25 Z'},
+      {id:'cloudR', color:'#ffffff', d:'M180 130 q5 -25 -15 -25 q-5 -10 -18 -5 q-5 -10 -20 0 q-5 -5 -10 5 q-5 25 10 25 Z'},
+      {id:'sun', color:'#ffd54a', d:'M100 60 m-15 0 a15 15 0 1 0 30 0 a15 15 0 1 0 -30 0 Z'},
+      {id:'eye1', color:'#2d2a26', d:'M94 56 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0 Z'},
+      {id:'eye2', color:'#2d2a26', d:'M106 56 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0 Z'},
+      {id:'mouth', color:'#2d2a26', d:'M92 64 q8 8 16 0 q-8 12 -16 0 Z'},
+    ]
+  },
+  /* ---- Reef friends (Zeezix channel) ---- */
+  {
+    id:'zeezix', title:'Zeezix',
+    viewBox:'0 0 200 150',
+    regions:[
+      {id:'water', color:'#a8d8ff', d:'M0 0 H200 V150 H0 Z'},
+      {id:'sand', color:'#ffe29a', d:'M0 118 q50 -10 100 0 q50 10 100 0 V150 H0 Z'},
+      {id:'coral', color:'#f07b3f', d:'M160 122 q-4 -30 6 -36 q4 18 10 2 q6 20 8 34 Z'},
+      {id:'tail', color:'#c8b6e2', d:'M70 80 L44 62 L50 80 L44 98 Z'},
+      {id:'finTop', color:'#c8b6e2', d:'M90 48 L102 28 L116 50 Z'},
+      {id:'body', color:'#8b5cf6', d:'M100 80 m-36 0 a36 36 0 1 0 72 0 a36 36 0 1 0 -72 0 Z'},
+      {id:'belly', color:'#ff82b4', d:'M100 100 m-20 0 a20 11 0 1 0 40 0 a20 11 0 1 0 -40 0 Z'},
+      {id:'mouth', color:'#5b2d9b', d:'M93 82 q8 7 16 0 q-8 5 -16 0 Z'},
+      {id:'eyeL', color:'#5b2d9b', d:'M88 68 m-8 0 a8 8 0 1 0 16 0 a8 8 0 1 0 -16 0 Z'},
+      {id:'eyeR', color:'#5b2d9b', d:'M114 68 m-8 0 a8 8 0 1 0 16 0 a8 8 0 1 0 -16 0 Z'},
+      {id:'shine', color:'#ffffff', d:'M85 65 m-2.5 0 a2.5 2.5 0 1 0 5 0 a2.5 2.5 0 1 0 -5 0 Z M111 65 m-2.5 0 a2.5 2.5 0 1 0 5 0 a2.5 2.5 0 1 0 -5 0 Z'},
+      {id:'wire', color:'#2d2a26', d:'M108 48 q12 -24 34 -22 l-0.4 3 q-20 -1 -31 20 Z'},
+      {id:'star', color:'#ffdc50', d:'M144 10 L146.9 18 L155.4 18.3 L148.8 23.5 L151.1 31.7 L144 27 L136.9 31.7 L139.2 23.5 L132.6 18.3 L141.1 18 Z'},
+    ]
+  },
+  {
+    id:'clownfish', title:'Clownfish',
+    viewBox:'0 0 200 150',
+    regions:[
+      {id:'water', color:'#a8d8ff', d:'M0 0 H200 V150 H0 Z'},
+      {id:'sand', color:'#ffe29a', d:'M0 118 q50 -10 100 0 q50 10 100 0 V150 H0 Z'},
+      {id:'anemone', color:'#ff82b4', d:'M128 122 q-4 -30 8 -34 q2 16 10 0 q8 20 12 34 Z M162 122 q0 -26 10 -30 q6 18 10 30 Z'},
+      {id:'tail', color:'#f07b3f', d:'M64 75 L40 58 L46 75 L40 92 Z'},
+      {id:'finTop', color:'#f07b3f', d:'M88 52 L100 36 L114 54 Z'},
+      {id:'body', color:'#f07b3f', d:'M100 75 m-40 0 a40 26 0 1 0 80 0 a40 26 0 1 0 -80 0 Z'},
+      {id:'stripe1', color:'#ffffff', d:'M116 54 q-5 21 0 42 h9 q-5 -21 0 -42 Z'},
+      {id:'stripe2', color:'#ffffff', d:'M94 50 q-4 25 0 50 h10 q-4 -25 0 -50 Z'},
+      {id:'stripe3', color:'#ffffff', d:'M70 59 q-3 16 0 32 h8 q-3 -16 0 -32 Z'},
+      {id:'finSide', color:'#ffb347', d:'M86 84 q12 -8 24 0 q-12 10 -24 0 Z'},
+      {id:'eye', color:'#2d2a26', d:'M134 68 m-5 0 a5 5 0 1 0 10 0 a5 5 0 1 0 -10 0 Z'},
+      {id:'bubbles', color:'#ffffff', d:'M152 40 m-5 0 a5 5 0 1 0 10 0 a5 5 0 1 0 -10 0 Z M162 28 m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0 Z'},
+    ]
+  }
+];
+// Difficulty grows with picture order but stops climbing after the 6th picture,
+// so the reef pictures stay fair (mud ratio would otherwise pass 50%).
+const MAX_DIFF_INDEX = 5;
+function diffIndex(picId){ return Math.min(MAX_DIFF_INDEX, Math.max(0, PICTURES.findIndex(p=>p.id===picId))); }
+
+/* ---------- Helpers ---------- */
+function parseColor(hex){
+  const m = hex.replace('#',''); const v = m.length===3 ? m.split('').map(c=>c+c).join('') : m;
+  return {r:parseInt(v.slice(0,2),16), g:parseInt(v.slice(2,4),16), b:parseInt(v.slice(4,6),16)};
+}
+function uniqueColors(pic){
+  const set = new Set(); pic.regions.forEach(r=> set.add(r.color));
+  return Array.from(set).filter(c=>c!=='#ffffff' && c!=='#fff');
+}
+
+/* ---------- Game state ---------- */
+let state = 'menu'; // 'menu','play','win','fail'
+let pic = null;       // active picture
+let filledMap = {};   // regionId -> bool
+let mudHits = 0;
+const MUD_HIT_CAP = 10;
+let speed = 320, baseSpeed = 320, maxSpeed = 540;
+let elapsed = 0;
+let spawnT = 0, spawnInt = 0.7;
+let player = {lane:1, x:0, y:0, vy:0, jumping:false};
+let drops = []; // {lane, y, color, isMud}
+let particles = [];
+let bgScroll = 0;
+let targetLane = 1;
+let pendingPickup = null;
+let inventory = {}; // color -> count
+let lastFillRegion = null; // last filled regionId (for mud undo)
+let recentlyFilled = []; // queue, mud removes the most recent
+let pictureFlashT = 0;
+
+/* ---------- Picture grid (menu) ---------- */
+function renderHome(){
+  document.getElementById('homeOverlay').style.display='flex';
+  document.getElementById('endOverlay').style.display='none';
+  document.getElementById('failOverlay').style.display='none';
+  const grid = document.getElementById('picGrid'); grid.innerHTML='';
+  PICTURES.forEach(p=>{
+    const card = document.createElement('button');
+    card.className='pic-card' + (save.done.includes(p.id)?' done':'');
+    card.innerHTML = `<svg viewBox="${p.viewBox}" preserveAspectRatio="xMidYMid meet">${
+      p.regions.map(r=>`<path d="${r.d}" fill="${save.done.includes(p.id)?r.color:'#fff'}" stroke="#222" stroke-width="1.2"/>`).join('')
+    }</svg><div class="title">${p.title}</div>`;
+    card.addEventListener('click', ()=>{
+      ensureAudio(); if(audioCtx&&audioCtx.state==='suspended') audioCtx.resume();
+      startPicture(p.id);
+    });
+    grid.appendChild(card);
+  });
+  document.getElementById('doneCount').textContent = save.done.length;
+  document.getElementById('totalCount').textContent = PICTURES.length;
+  state='menu';
+}
+
+function startPicture(picId){
+  pic = PICTURES.find(p=>p.id===picId);
+  filledMap = {};
+  pic.regions.forEach(r=> filledMap[r.id] = false);
+  mudHits=0; elapsed=0; spawnT=0;
+  drops=[]; particles=[]; inventory={};
+  recentlyFilled=[]; pictureFlashT=0;
+  // base speed scales with picture index for difficulty (capped, see diffIndex)
+  const idx = diffIndex(picId);
+  baseSpeed = 320 + idx*20;
+  maxSpeed = 520 + idx*30;
+  speed = baseSpeed;
+  spawnInt = Math.max(0.45, 0.75 - idx*0.04);
+
+  player = {lane:1, targetLane:1, x:laneX(1), y:H*0.78, vy:0, jumping:false};
+  targetLane = 1;
+  document.getElementById('homeOverlay').style.display='none';
+  document.getElementById('endOverlay').style.display='none';
+  document.getElementById('failOverlay').style.display='none';
+  state='play';
+  refreshHud();
+}
+
+function refreshHud(){
+  const filled = pic ? Object.values(filledMap).filter(Boolean).length : 0;
+  const total = pic ? pic.regions.length : 0;
+  document.getElementById('filled').textContent = filled;
+  document.getElementById('total').textContent = total;
+  document.getElementById('mud').textContent = MUD_HIT_CAP - mudHits;
+}
+
+function endWin(){
+  state='win';
+  if(!save.done.includes(pic.id)) save.done.push(pic.id);
+  persist();
+  YTGame.sendScore(save.done.length);
+  winFanfare();
+  document.getElementById('endMud').textContent = mudHits;
+  // Build a final preview svg with all regions filled
+  const prev = document.getElementById('endPreview');
+  prev.innerHTML = `<svg viewBox="${pic.viewBox}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%">${
+    pic.regions.map(r=>`<path d="${r.d}" fill="${r.color}" stroke="#222" stroke-width="1.2"/>`).join('')
+  }</svg>`;
+  setTimeout(()=>{ document.getElementById('endOverlay').style.display='flex'; }, 500);
+}
+function endFail(){
+  state='fail';
+  document.getElementById('failOverlay').style.display='flex';
+}
+
+document.getElementById('nextBtn').addEventListener('click', ()=>{
+  const i = PICTURES.findIndex(p=>p.id===pic.id);
+  startPicture(PICTURES[(i+1)%PICTURES.length].id);
+});
+document.getElementById('retryBtn').addEventListener('click', ()=>startPicture(pic.id));
+
+// All Home affordances go to the launcher in one tap
+function goToLauncher(){ window.location.href = 'index.html'; }
+document.getElementById('homeBtn').addEventListener('click', goToLauncher);     // end-overlay Home
+document.getElementById('failHomeBtn').addEventListener('click', goToLauncher); // fail-overlay Home
+document.getElementById('homeFab').addEventListener('click', goToLauncher);     // persistent corner button
+
+// Parent-gated reset — wipes Color Dash progress only
+function resetThisGame(){
+  const a = 3 + Math.floor(Math.random()*7);
+  const b = 3 + Math.floor(Math.random()*7);
+  const answer = prompt('Parent gate — what is ' + a + ' × ' + b + '?');
+  if(answer === null) return;
+  if(parseInt(answer,10) !== a*b){ alert('That’s not quite right — nothing was changed.'); return; }
+  if(!confirm('Reset Color Dash progress (all completed paintings)?')) return;
+  try { localStorage.removeItem('color_dash_v1'); } catch(e){}
+  save = {done:[]};
+  persist();
+  renderHome();
+  alert('Color Dash reset. Pick a picture to start fresh!');
+}
+const resetLink = document.getElementById('resetThisGame');
+if(resetLink) resetLink.addEventListener('click', resetThisGame);
+
+/* ---------- Input ---------- */
+function laneX(i){
+  // 3 lanes centered, lane width = 26% of W
+  const lw = W*0.22;
+  return W/2 + (i-1)*lw;
+}
+function moveLane(dir){
+  if(state!=='play') return;
+  const nl = Math.max(0, Math.min(2, targetLane + dir));
+  targetLane = nl;
+}
+function jump(){
+  if(state!=='play' || player.jumping) return;
+  player.jumping=true; player.vy=-700; jumpSound();
+}
+window.addEventListener('keydown', e=>{
+  if(e.key==='ArrowLeft') moveLane(-1);
+  else if(e.key==='ArrowRight') moveLane(1);
+  else if(e.key===' '||e.key==='ArrowUp') jump();
+  else if(e.key==='Escape') renderHome();
+});
+
+let touchSX=0,touchSY=0,touchT=0,active=false;
+canvas.addEventListener('pointerdown', e=>{
+  touchSX=e.clientX; touchSY=e.clientY; touchT=performance.now(); active=true;
+});
+canvas.addEventListener('pointerup', e=>{
+  if(!active) return; active=false;
+  const dx=e.clientX-touchSX, dy=e.clientY-touchSY, dt=performance.now()-touchT;
+  if(Math.abs(dx)>30 && Math.abs(dx)>Math.abs(dy)) moveLane(dx>0?1:-1);
+  else if(dy<-30) jump();
+  else if(dt<260) jump();
+});
+canvas.addEventListener('contextmenu', e=>e.preventDefault());
+let paused=false;
+YTGame.onPause(()=>{ paused=true; });
+YTGame.onResume(()=>{ paused=false; });
+
+/* ---------- Spawning ---------- */
+function spawnDrop(){
+  // pick a lane
+  const lane = Math.floor(Math.random()*3);
+  // Decide: mud or useful color
+  const idx = diffIndex(pic.id);
+  // Mud ratio rises with picture index (capped)
+  const mudRatio = 0.25 + idx*0.04;
+  if(Math.random() < mudRatio){
+    drops.push({lane, y:-30, color:'#7a4f2a', isMud:true});
+    return;
+  }
+  // Pick a useful color: pull from unfilled regions
+  const unfilled = pic.regions.filter(r=>!filledMap[r.id] && r.color!=='#ffffff' && r.color!=='#fff');
+  const palette = unfilled.length ? unfilled : pic.regions;
+  const target = palette[Math.floor(Math.random()*palette.length)];
+  drops.push({lane, y:-30, color:target.color, isMud:false});
+}
+
+/* ---------- Pickup logic ---------- */
+function pickup(color){
+  if(color === '#7a4f2a' || color === undefined){
+    // Mud
+    mudHits++;
+    mudSound();
+    // Undo last filled region (if any)
+    if(recentlyFilled.length>0){
+      const rid = recentlyFilled.pop();
+      filledMap[rid] = false;
+      pictureFlashT = 0.4;
+    }
+    if(mudHits >= MUD_HIT_CAP) endFail();
+    refreshHud();
+    return;
+  }
+  dropSound(color);
+  // Try to fill a region needing this color
+  const need = pic.regions.find(r=> !filledMap[r.id] && r.color===color);
+  if(need){
+    filledMap[need.id] = true;
+    recentlyFilled.push(need.id);
+    fillRegionSound();
+    pictureFlashT = 0.4;
+    for(let i=0;i<14;i++){
+      particles.push({x:laneX(player.lane), y:player.y-10, vx:(Math.random()-.5)*240, vy:-Math.random()*240, r:3+Math.random()*4, color:color, life:1});
+    }
+    // check win
+    if(pic.regions.every(r=>filledMap[r.id] || r.color==='#ffffff' || r.color==='#fff')){
+      // ensure white "background" regions auto-flag (we paint everything except #fff)
+      pic.regions.forEach(r=>{ if(r.color==='#ffffff'||r.color==='#fff') filledMap[r.id]=true; });
+      endWin();
+      return;
+    }
+  } else {
+    // No region needs this color right now — store as bonus
+    inventory[color] = (inventory[color]||0)+1;
+    // small confetti
+    for(let i=0;i<6;i++){
+      particles.push({x:laneX(player.lane), y:player.y-10, vx:(Math.random()-.5)*120, vy:-Math.random()*180, r:2+Math.random()*3, color:color, life:0.8});
+    }
+  }
+  refreshHud();
+}
+
+/* ---------- Update ---------- */
+let last = performance.now();
+function frame(now){
+  const dt = Math.min(0.04,(now-last)/1000); last=now;
+  if(state==='play' && !paused) update(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+function update(dt){
+  elapsed += dt;
+  const r = Math.min(1, elapsed/40);
+  speed = baseSpeed + (maxSpeed-baseSpeed)*r;
+  bgScroll += speed*dt;
+  // glide to target lane
+  const tx = laneX(targetLane);
+  player.x += (tx-player.x)*Math.min(1,dt*14);
+  if(Math.abs(player.x-tx)<2) player.lane=targetLane;
+  // jump
+  if(player.jumping){
+    player.vy += 1800*dt; player.y += player.vy*dt;
+    if(player.y>=H*0.78){ player.y=H*0.78; player.vy=0; player.jumping=false; }
+  } else { player.y = H*0.78; }
+  // spawn
+  spawnT += dt;
+  if(spawnT > spawnInt){ spawnT = 0; spawnDrop(); if(Math.random()<0.3) spawnDrop(); }
+  // move drops
+  drops.forEach(d=> d.y += speed*dt);
+  // collide drops
+  drops.forEach(d=>{
+    if(d.taken) return;
+    if(d.lane===player.lane && Math.abs(d.y - player.y) < 32 && !player.jumping){
+      d.taken=true;
+      pickup(d.color);
+    }
+  });
+  drops = drops.filter(d=> d.y < H+40 && !d.taken);
+  // particles
+  particles.forEach(p=>{ p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=900*dt; p.life-=dt*1.6; });
+  particles = particles.filter(p=>p.life>0);
+  if(pictureFlashT>0) pictureFlashT -= dt;
+}
+
+/* ---------- Draw ---------- */
+function drawBg(){
+  // sky / road
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#2a2f5b'); g.addColorStop(1,'#5b4f8c');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  // stars
+  ctx.fillStyle='rgba(255,255,255,.6)';
+  for(let i=0;i<24;i++){
+    const x=(i*73 + (bgScroll*0.03)) % W;
+    const y= (i*47) % (H*0.4);
+    ctx.fillRect(x,y,2,2);
+  }
+}
+function drawTrack(){
+  const top = H*0.42, w0=W*0.36, w1=W*1.8;
+  ctx.fillStyle='#1a1d3a';
+  ctx.beginPath();
+  ctx.moveTo(W/2-w0/2, top); ctx.lineTo(W/2+w0/2, top);
+  ctx.lineTo(W/2+w1/2, H); ctx.lineTo(W/2-w1/2, H); ctx.closePath(); ctx.fill();
+  // lane lines
+  for(let i=0;i<16;i++){
+    const t = ((i*70 + bgScroll) % 1100)/1100;
+    const y = top + (H-top)*t*t;
+    const w = w0+(w1-w0)*t*t;
+    ctx.fillStyle=`rgba(255,255,255,${0.15+t*0.4})`;
+    ctx.fillRect(W/2 - w*0.001, y, w*0.002, 4+t*4);
+    ctx.fillRect(W/2 - w*0.16, y, w*0.012, 6+t*6);
+    ctx.fillRect(W/2 + w*0.16 - w*0.012, y, w*0.012, 6+t*6);
+  }
+}
+function drawRobot(x,y){
+  ctx.save(); ctx.translate(x,y);
+  // shadow
+  ctx.fillStyle='rgba(0,0,0,.35)';
+  ctx.beginPath(); ctx.ellipse(0,28,28,7,0,0,Math.PI*2); ctx.fill();
+  // body
+  ctx.fillStyle='#c5c8e6';
+  ctx.fillRect(-22,-6,44,30);
+  // head
+  ctx.fillStyle='#e1e3f0'; ctx.fillRect(-18,-30,36,26);
+  // visor
+  ctx.fillStyle='#3aa6ff'; ctx.fillRect(-14,-24,28,14);
+  ctx.fillStyle='#fff'; ctx.fillRect(-10,-22,4,4); ctx.fillRect(2,-22,4,4);
+  // antenna
+  ctx.fillStyle='#ff7eb4'; ctx.fillRect(-2,-38,4,8);
+  ctx.beginPath(); ctx.arc(0,-40,4,0,Math.PI*2); ctx.fill();
+  // legs
+  ctx.fillStyle='#7e85ad';
+  ctx.fillRect(-18,24,12,6); ctx.fillRect(6,24,12,6);
+  ctx.restore();
+}
+function drawDrop(d){
+  const x=laneX(d.lane), y=d.y;
+  if(d.isMud){
+    ctx.fillStyle='#7a4f2a';
+    ctx.beginPath(); ctx.arc(x,y,20,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#5a371b';
+    ctx.beginPath(); ctx.arc(x-6,y+6,4,0,Math.PI*2); ctx.arc(x+8,y-4,3,0,Math.PI*2); ctx.fill();
+    // frown
+    ctx.strokeStyle='#fff'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(x,y+4,5,Math.PI,2*Math.PI); ctx.stroke();
+    ctx.fillStyle='#fff'; ctx.fillRect(x-7,y-4,2,2); ctx.fillRect(x+5,y-4,2,2);
+  } else {
+    ctx.fillStyle=d.color;
+    ctx.beginPath();
+    ctx.moveTo(x,y-18); ctx.bezierCurveTo(x+18,y, x+10,y+18, x,y+18);
+    ctx.bezierCurveTo(x-10,y+18, x-18,y, x,y-18);
+    ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,.5)';
+    ctx.beginPath(); ctx.ellipse(x-4,y-6,3,5,0,0,Math.PI*2); ctx.fill();
+  }
+}
+function drawPicturePanel(){
+  if(!pic) return;
+  // Top picture panel — starts below the button/HUD row so nothing covers the painting
+  const top = 56;
+  const panelH = H*0.30;
+  const padX = 20;
+  // background panel
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(padX, top, W-padX*2, panelH);
+  // border
+  ctx.strokeStyle = pictureFlashT>0 ? '#ffd54a' : '#2d2a26';
+  ctx.lineWidth = pictureFlashT>0 ? 6 : 3;
+  ctx.strokeRect(padX, top, W-padX*2, panelH);
+  // draw svg-like regions using Path2D from "d" attribute
+  const vb = pic.viewBox.split(/\s+/).map(Number); // x,y,w,h
+  const innerX = padX+8, innerY = top+8, innerW = W-padX*2-16, innerH = panelH-16;
+  const sx = innerW/vb[2], sy = innerH/vb[3];
+  const s = Math.min(sx, sy);
+  const ox = innerX + (innerW - vb[2]*s)/2 - vb[0]*s;
+  const oy = innerY + (innerH - vb[3]*s)/2 - vb[1]*s;
+  pic.regions.forEach(r=>{
+    let path;
+    try{ path = new Path2D(r.d); }catch(e){ return; }
+    ctx.save();
+    ctx.translate(ox, oy);
+    ctx.scale(s, s);
+    ctx.fillStyle = filledMap[r.id] ? r.color : '#ffffff';
+    ctx.fill(path);
+    ctx.lineWidth = 1.2/s;
+    ctx.strokeStyle = '#2d2a26';
+    ctx.stroke(path);
+    ctx.restore();
+  });
+  // mud counter visual
+  if(mudHits>0){
+    ctx.fillStyle='rgba(122,79,42,.9)';
+    for(let i=0;i<mudHits;i++){
+      ctx.beginPath(); ctx.arc(padX+12+i*14, top+panelH+10, 5,0,Math.PI*2); ctx.fill();
+    }
+  }
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  drawBg();
+  drawTrack();
+  // drops
+  drops.forEach(drawDrop);
+  // particles
+  particles.forEach(p=>{
+    ctx.globalAlpha=Math.max(0,p.life);
+    ctx.fillStyle=p.color;
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+  });
+  ctx.globalAlpha=1;
+  // robot
+  if(state==='play'||state==='win') drawRobot(player.x, player.y);
+  // picture panel on top
+  drawPicturePanel();
+}
+
+requestAnimationFrame(frame);
+
+/* Boot */
+(async function boot(){
+  await bootSave();
+  renderHome();
+  requestAnimationFrame(()=>{
+    YTGame.firstFrameReady();
+    YTGame.gameReady();
+  });
+})();
+
+/* ---------- Toast helper (unused for now but useful) ---------- */
+function showToast(msg, ms=1200){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(showToast._t); showToast._t = setTimeout(()=>t.classList.remove('show'), ms);
+}
+</script>
+</body>
+</html>

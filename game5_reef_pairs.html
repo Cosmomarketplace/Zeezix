@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+<title>Reef Pairs</title>
+<!-- YouTube Playables SDK (loads only inside the Playables environment; otherwise script 404s and bridge no-ops). -->
+<script src="https://www.youtube.com/game_api/v1" onerror="window.__ytGameLoadFailed=true"></script>
+<style>
+  html,body{margin:0;padding:0;background:#5fbcf0;overflow:hidden;
+    font-family:system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+    user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;
+    touch-action:none;height:100%;min-height:100svh;width:100%;}
+  body{height:100svh;}
+  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;}
+  canvas{display:block;background:#5fbcf0;}
+  #probe{position:fixed;top:0;left:0;width:0;height:0;padding-top:env(safe-area-inset-top,0px);visibility:hidden;pointer-events:none;}
+  /* Home button visible during gameplay */
+  #homeFab{position:fixed;top:calc(10px + env(safe-area-inset-top,0));left:10px;width:46px;height:46px;
+    border-radius:999px;background:rgba(255,255,255,.92);color:#222;border:none;font-size:20px;
+    cursor:pointer;z-index:10;box-shadow:0 2px 0 rgba(0,0,0,.15);}
+  #homeFab:active{transform:translateY(2px);box-shadow:0 0 0 rgba(0,0,0,.15);}
+  #muteBtn{position:fixed;top:calc(10px + env(safe-area-inset-top,0));right:10px;width:46px;height:46px;border-radius:999px;
+           background:rgba(255,255,255,.9);border:none;font-size:20px;cursor:pointer;z-index:10;}
+  .hud{position:fixed;top:calc(10px + env(safe-area-inset-top,0));left:62px;right:62px;display:flex;justify-content:center;gap:10px;
+       pointer-events:none;font-weight:700;color:#fff;text-shadow:0 2px 0 rgba(0,0,0,.25);
+       font-size:20px;z-index:5;}
+  .hud .pill{background:rgba(0,0,0,.25);padding:9px 14px;border-radius:999px;white-space:nowrap;}
+  .btn{pointer-events:auto;background:#fff;color:#333;border:none;border-radius:999px;
+       padding:10px 14px;font-weight:800;font-size:18px;box-shadow:0 4px 0 rgba(0,0,0,.15);
+       cursor:pointer;}
+  .btn:active{transform:translateY(2px);box-shadow:0 2px 0 rgba(0,0,0,.15);}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;
+           justify-content:center;flex-direction:column;color:#fff;text-align:center;z-index:20;
+           padding:20px;}
+  .overlay h1{font-size:44px;margin:0 0 8px;text-shadow:0 4px 0 rgba(0,0,0,.3);}
+  .overlay p{font-size:20px;margin:6px 0 18px;opacity:.95;}
+  .overlay .big{font-size:34px;background:#fff;color:#5B2D9B;padding:18px 30px;border-radius:999px;
+       border:none;font-weight:900;cursor:pointer;box-shadow:0 6px 0 rgba(0,0,0,.25);}
+  .overlay .big:active{transform:translateY(3px);box-shadow:0 3px 0 rgba(0,0,0,.25);}
+  .resetLink{margin-top:6px;background:transparent;border:none;color:rgba(255,255,255,.55);font-size:11px;text-decoration:underline;cursor:pointer;padding:6px 10px;}
+  .shells{font-size:30px;letter-spacing:8px;margin:0 0 10px;}
+</style>
+</head>
+<body>
+<div id="probe"></div>
+<div id="wrap"><canvas id="c"></canvas></div>
+<button id="homeFab" aria-label="All games (Zeezix)">⭐</button>
+<div class="hud">
+  <div class="pill">Round <span id="round">1</span></div>
+  <div class="pill">⭐ <span id="pairs">0</span>/<span id="total">3</span></div>
+</div>
+<button id="muteBtn" aria-label="Mute">🔊</button>
+
+<div id="startOverlay" class="overlay">
+  <h1>Reef Pairs</h1>
+  <div class="shells">🐚🐚</div>
+  <p>Flip two. Find the match!</p>
+  <button class="big" id="startBtn">▶ Play</button>
+  <p style="font-size:14px;opacity:.8;margin-top:14px;">Rounds done: <span id="lifetime">0</span></p>
+  <button id="resetThisGame" class="resetLink">⚙ Parents: reset this game</button>
+</div>
+
+<div id="endOverlay" class="overlay" style="display:none">
+  <h1>Ta-da!</h1>
+  <p>All pairs! Way to go!</p>
+  <button class="big" id="nextBtn">▶ Next</button>
+  <button class="btn" id="homeBtn" style="margin-top:14px">🏠 Home</button>
+</div>
+
+<script>
+/* =================================================================
+   Reef Pairs — single-file HTML5 memory game for YouTube Playables.
+   No external assets. No network calls. No timer, no fail state.
+   ================================================================= */
+
+/* ----------------------------------------------------------------
+   YouTube Playables SDK Bridge
+   Safely wraps ytgame.* APIs. No-ops if SDK is absent or fails to
+   load, so the game still plays on any host (Netlify, file://, etc.)
+   ---------------------------------------------------------------- */
+const SAVE_FALLBACK_KEY = 'reef_pairs_v1';
+const YTGame = (() => {
+  const hasSdk = typeof ytgame !== 'undefined';
+  const inPlayables = hasSdk && !!ytgame.IN_PLAYABLES_ENV;
+  const safe = (fn) => { try { return fn(); } catch(e){ return undefined; } };
+  return {
+    hasSdk, inPlayables,
+    firstFrameReady(){ if(hasSdk) safe(()=>ytgame.game.firstFrameReady()); },
+    gameReady(){ if(hasSdk) safe(()=>ytgame.game.gameReady()); },
+    saveData(obj){
+      const s = JSON.stringify(obj);
+      if(inPlayables){ safe(()=>ytgame.game.saveData(s)); }
+      try{ localStorage.setItem(SAVE_FALLBACK_KEY, s); }catch(e){}
+    },
+    async loadData(fallback){
+      if(inPlayables){
+        try{ const s = await ytgame.game.loadData(); if(s) return JSON.parse(s); }catch(e){}
+      }
+      try{ const s = localStorage.getItem(SAVE_FALLBACK_KEY); if(s) return JSON.parse(s); }catch(e){}
+      return fallback;
+    },
+    sendScore(value){
+      if(inPlayables && typeof value === 'number' && isFinite(value)){
+        safe(()=>ytgame.engagement.sendScore({value: Math.floor(value)}));
+      }
+    },
+    onPause(cb){
+      if(hasSdk) safe(()=>ytgame.system.onPause(cb));
+      window.addEventListener('blur', cb);
+      document.addEventListener('visibilitychange', ()=>{ if(document.hidden) cb(); });
+    },
+    onResume(cb){
+      if(hasSdk) safe(()=>ytgame.system.onResume(cb));
+      window.addEventListener('focus', cb);
+      document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) cb(); });
+    },
+    initialAudioEnabled(){
+      if(hasSdk){ const v = safe(()=>ytgame.system.isAudioEnabled()); if(typeof v === 'boolean') return v; }
+      return true;
+    },
+    onAudioChange(cb){
+      if(hasSdk) safe(()=>ytgame.system.onAudioEnabledChange(cb));
+    },
+    logError(msg){ if(hasSdk) safe(()=>ytgame.health.logError()); if(msg) console.warn('[pairs]', msg); },
+  };
+})();
+window.addEventListener('error', e => YTGame.logError(e && e.message));
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const probe = document.getElementById('probe');
+const INK = '#2d2a26';
+
+let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2), SAFE_TOP = 0;
+let reef = {weeds:[], bg:[]};
+function rnd(a,b){ return a + Math.random()*(b-a); }
+function sandHeight(){ return Math.max(28, Math.min(60, H*0.07)); }
+function buildReef(){
+  reef.weeds = []; reef.bg = [];
+  const nW = Math.ceil(W/70);
+  for(let i=0;i<nW;i++) reef.weeds.push({x:(i+rnd(0.2,0.8))*70, h:rnd(30,70), ph:rnd(0,6.28), c:['#7ED957','#4CC94C','#A6E86A'][i%3]});
+  for(let i=0;i<14;i++) reef.bg.push({x:rnd(0,W), y:rnd(0,H), r:rnd(2,6), v:rnd(12,30)});
+}
+function resize(){
+  const vv = window.visualViewport;
+  W = window.innerWidth;
+  // Use visualViewport.height when available (iOS Safari) so we stay inside the actually-visible area.
+  H = vv ? Math.round(vv.height) : window.innerHeight;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  SAFE_TOP = parseFloat(getComputedStyle(probe).paddingTop) || 0;
+  buildReef();
+  try { if(typeof cards !== 'undefined' && cards.length) layout(); } catch(e){ /* cards not yet declared on first resize() — fine */ }
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', resize);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', resize);
+  window.visualViewport.addEventListener('scroll', resize);
+}
+resize();
+
+/* ---------- Audio (WebAudio, generated on the fly) ---------- */
+let audioCtx = null, muted = false;
+function ensureAudio(){
+  if(!audioCtx){
+    try{ audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){}
+  }
+}
+function blip(freq, dur, type='sine', vol=0.18, delay=0){
+  if(!audioCtx || muted) return;
+  const t0 = audioCtx.currentTime + delay;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.linearRampToValueAtTime(vol, t0+0.012);
+  g.gain.exponentialRampToValueAtTime(0.001, t0+dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(t0); o.stop(t0+dur+0.03);
+}
+function flipSound(){ blip(700,0.07,'triangle',0.12); blip(900,0.08,'triangle',0.08,0.05); }
+function matchSound(){ [659,880,1174].forEach((f,i)=>blip(f,0.18,'triangle',0.18,i*0.08)); }
+function missSound(){ blip(360,0.14,'sine',0.1); blip(320,0.18,'sine',0.08,0.12); }
+function tadaSound(){ [523,659,784,1046,1318].forEach((f,i)=>blip(f,0.24,'triangle',0.18,i*0.1)); }
+
+const muteBtn = document.getElementById('muteBtn');
+muteBtn.addEventListener('click', ()=>{
+  muted = !muted;
+  muteBtn.textContent = muted ? '🔇' : '🔊';
+});
+
+/* ---------- Persistence (Playables saveData + localStorage fallback) ---------- */
+let save = {rounds:0, pairs:0};
+function saveData(){ YTGame.saveData(save); }
+async function bootSave(){
+  const loaded = await YTGame.loadData({});
+  save = Object.assign({rounds:0, pairs:0}, loaded || {});
+  document.getElementById('lifetime').textContent = save.rounds;
+}
+
+/* ---------- Draw helpers ---------- */
+let t = 0, lastDt = 0.016;
+function ell(x,y,rx,ry,rot,fill,stroke,lw){
+  ctx.beginPath(); ctx.ellipse(x,y,rx,ry,rot||0,0,Math.PI*2);
+  ctx.fillStyle=fill; ctx.fill();
+  if(stroke){ ctx.strokeStyle=stroke; ctx.lineWidth=lw||2.5; ctx.stroke(); }
+}
+function star(x,y,r,fill,stroke){
+  ctx.beginPath();
+  for(let i=0;i<10;i++){ const a=-Math.PI/2 + i*Math.PI/5; const rr = i%2===0? r : r*0.45; ctx.lineTo(x+Math.cos(a)*rr, y+Math.sin(a)*rr); }
+  ctx.closePath(); ctx.fillStyle=fill; ctx.fill();
+  if(stroke){ ctx.strokeStyle=stroke; ctx.lineWidth=2; ctx.lineJoin='round'; ctx.stroke(); }
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath(); ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h); ctx.lineTo(x+r,y+h);
+  ctx.quadraticCurveTo(x,y+h,x,y+h-r); ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath();
+}
+function eye(x,y,r,iris){
+  ell(x,y,r,r,0,'#fff',INK,2);
+  ell(x+r*0.15,y+r*0.1,r*0.55,r*0.55,0,iris||INK);
+  if(iris) ell(x+r*0.15,y+r*0.1,r*0.3,r*0.3,0,INK);
+  ell(x+r*0.35,y-r*0.25,r*0.2,r*0.2,0,'#fff');
+}
+function smile(x,y,r){ ctx.strokeStyle=INK; ctx.lineWidth=2.5; ctx.lineCap='round'; ctx.beginPath(); ctx.arc(x,y,r,0.15,Math.PI-0.15); ctx.stroke(); }
+function cheeks(x,y,d){ ell(x-d,y,4,3,0,'#FF82B4'); ell(x+d,y,4,3,0,'#FF82B4'); }
+
+/* ---------- Sea friends (each drawn in a ~110-unit box centered at 0,0) ---------- */
+function drawZeezixFront(x,y,s){
+  ctx.save(); ctx.translate(x,y); ctx.scale(s,s);
+  ctx.strokeStyle=INK; ctx.lineWidth=3; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(0,-40); ctx.quadraticCurveTo(-10,-60,2,-74); ctx.stroke();
+  ctx.save(); ctx.globalAlpha=0.35+0.15*Math.sin(t*5); ctx.fillStyle='#FFDC50';
+  ctx.beginPath(); ctx.arc(2,-80,16,0,Math.PI*2); ctx.fill(); ctx.restore();
+  star(2,-80,9,'#FFDC50',INK);
+  ell(-42,8,13,8,-0.4,'#9c64f2',INK); ell(42,8,13,8,0.4,'#9c64f2',INK);
+  ell(-16,42,13,6,0,'#5B2D9B',INK); ell(16,42,13,6,0,'#5B2D9B',INK);
+  const g=ctx.createLinearGradient(0,-42,0,42); g.addColorStop(0,'#A87FF5'); g.addColorStop(1,'#5B2D9B');
+  ell(0,0,36,42,0,g,INK,3);
+  ell(0,18,20,15,0,'#FF9EC6');
+  eye(-13,-12,10,'#7C3AED'); eye(13,-12,10,'#7C3AED');
+  cheeks(0,0,24);
+  smile(0,4,7);
+  ctx.restore();
+}
+function drawZeezixMini(x,y,s){ drawZeezixFront(x, y+20*s, s*0.74); }
+function drawPip(x,y,s){
+  ctx.save(); ctx.translate(x,y); ctx.scale(s,s);
+  ctx.strokeStyle='#E8956A'; ctx.lineWidth=4; ctx.lineCap='round';
+  for(let i=0;i<12;i++){ const a=i*Math.PI/6+0.26; ctx.beginPath(); ctx.moveTo(Math.cos(a)*30,Math.sin(a)*30); ctx.lineTo(Math.cos(a)*41,Math.sin(a)*41); ctx.stroke(); }
+  ell(-38,0,10,9,0,'#FFB07C',INK);
+  ell(0,0,33,30,0,'#FFC8A0',INK,3);
+  ell(0,13,18,11,0,'#FFE7D6');
+  ell(10,20,8,5,0.6,'#FFB07C',INK);
+  eye(-11,-7,8); eye(11,-7,8);
+  cheeks(0,4,22);
+  ell(2,12,5,4,0,'#FF82B4',INK,2);
+  ctx.restore();
+}
+function drawCoral(x,y,s){
+  ctx.save(); ctx.translate(x,y); ctx.scale(s,s);
+  ctx.fillStyle='#FF8C3A'; ctx.strokeStyle=INK; ctx.lineWidth=2.5; ctx.lineJoin='round';
+  ctx.beginPath(); ctx.moveTo(-28,0); ctx.lineTo(-48,-18); ctx.lineTo(-42,0); ctx.lineTo(-48,18); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ell(0,0,36,24,0,'#FF8C3A',INK,3);
+  ctx.save(); ctx.beginPath(); ctx.ellipse(0,0,36,24,0,0,Math.PI*2); ctx.clip();
+  ctx.fillStyle='#fff'; ctx.strokeStyle=INK; ctx.lineWidth=2;
+  [[-14,7],[10,8]].forEach(p=>{ ctx.beginPath(); ctx.ellipse(p[0],0,p[1],30,0,0,Math.PI*2); ctx.fill(); ctx.stroke(); });
+  ctx.restore();
+  ell(-6,-24,12,6,0,'#FF8C3A',INK);
+  ell(2,9,9,5,0.5,'#FFB04C',INK);
+  eye(19,-6,7);
+  smile(27,5,4);
+  ctx.restore();
+}
+function drawLumi(x,y,s){
+  ctx.save(); ctx.translate(x,y); ctx.scale(s,s);
+  ctx.strokeStyle='#FF9EC6'; ctx.lineWidth=4; ctx.lineCap='round';
+  for(let i=-2;i<=2;i++){ const bx=i*12; ctx.beginPath(); ctx.moveTo(bx,4); ctx.quadraticCurveTo(bx+8*Math.sin(t*2+i), 24, bx-6*Math.sin(t*2+i), 42); ctx.stroke(); }
+  const g=ctx.createLinearGradient(0,-36,0,8); g.addColorStop(0,'#FFC2DD'); g.addColorStop(1,'#FF82B4');
+  ctx.fillStyle=g; ctx.strokeStyle=INK; ctx.lineWidth=2.5; ctx.lineJoin='round';
+  ctx.beginPath(); ctx.arc(0,-4,34,Math.PI,0);
+  for(let i=0;i<4;i++){ const x0=34-i*17, x1=34-(i+1)*17; ctx.quadraticCurveTo((x0+x1)/2, 6, x1, -4); }
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.save(); ctx.globalAlpha=0.6; ell(-13,-20,8,5,-0.6,'#fff'); ctx.restore();
+  eye(-11,-10,7); eye(11,-10,7);
+  cheeks(0,-2,22);
+  smile(0,-2,5);
+  ctx.restore();
+}
+function drawOcto(x,y,s){
+  ctx.save(); ctx.translate(x,y); ctx.scale(s,s);
+  ctx.strokeStyle='#9C64F2'; ctx.lineWidth=7; ctx.lineCap='round';
+  for(let i=0;i<6;i++){ const bx=-25+i*10; const d = i<3?-1:1; ctx.beginPath(); ctx.moveTo(bx,14); ctx.quadraticCurveTo(bx+d*4, 34, bx+d*14+Math.sin(t*3+i)*3, 36); ctx.stroke(); }
+  const g=ctx.createLinearGradient(0,-38,0,22); g.addColorStop(0,'#B48CFF'); g.addColorStop(1,'#8B5CF6');
+  ell(0,-6,32,32,0,g,INK,3);
+  eye(-11,-9,8); eye(11,-9,8);
+  cheeks(0,3,22);
+  smile(0,5,5);
+  ctx.strokeStyle='rgba(255,255,255,0.9)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.arc(32,-34,6,0,Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(40,-46,3.5,0,Math.PI*2); ctx.stroke();
+  ctx.restore();
+}
+function drawSeahorse(x,y,s){
+  ctx.save(); ctx.translate(x,y); ctx.scale(s,s);
+  const C='#3AA6FF';
+  const path=()=>{ ctx.beginPath(); ctx.moveTo(2,-14); ctx.quadraticCurveTo(20,4,10,24); ctx.quadraticCurveTo(2,38,-10,32); ctx.quadraticCurveTo(-18,26,-8,22); };
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.strokeStyle=INK; ctx.lineWidth=18; path(); ctx.stroke();
+  ctx.strokeStyle=C; ctx.lineWidth=13; path(); ctx.stroke();
+  ctx.strokeStyle='#8FD3FF'; ctx.lineWidth=2.5;
+  for(let i=0;i<4;i++){ ctx.beginPath(); ctx.moveTo(10+i*0.5,-2+i*7); ctx.lineTo(16+i*0.5, i*7); ctx.stroke(); }
+  ell(18,2,6,10,0.3,'#8FD3FF',INK);
+  ell(0,-24,15,13,0,C,INK,2.5);
+  ctx.fillStyle=C; ctx.strokeStyle=INK; ctx.lineWidth=2.5; rr(8,-28,20,9,4.5); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#8FD3FF'; ctx.beginPath(); ctx.moveTo(-12,-33); ctx.lineTo(-8,-44); ctx.lineTo(-3,-34); ctx.lineTo(2,-44); ctx.lineTo(6,-34); ctx.closePath(); ctx.fill(); ctx.stroke();
+  eye(2,-26,5.5);
+  ctx.strokeStyle='#fff'; ctx.lineWidth=3; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(3,-17); ctx.quadraticCurveTo(7,-13,11,-17); ctx.stroke();
+  ctx.restore();
+}
+function drawStarfish(x,y,s){
+  ctx.save(); ctx.translate(x,y); ctx.scale(s,s);
+  ctx.lineJoin='round';
+  ctx.beginPath(); for(let i=0;i<10;i++){ const a=-Math.PI/2+i*Math.PI/5; const r=i%2? 17:40; ctx.lineTo(Math.cos(a)*r, Math.sin(a)*r+4); } ctx.closePath();
+  ctx.strokeStyle=INK; ctx.lineWidth=10; ctx.stroke(); ctx.fillStyle='#FFB04C'; ctx.fill(); ctx.strokeStyle='#FFB04C'; ctx.lineWidth=6; ctx.stroke();
+  ctx.fillStyle='#FFDC50'; for(let i=0;i<5;i++){ const a=-Math.PI/2+i*Math.PI*2/5; ctx.beginPath(); ctx.arc(Math.cos(a)*27, Math.sin(a)*27+4, 3,0,Math.PI*2); ctx.fill(); }
+  eye(-8,0,6); eye(8,0,6);
+  cheeks(0,8,16);
+  smile(0,7,5);
+  ctx.restore();
+}
+function drawCrab(x,y,s){
+  ctx.save(); ctx.translate(x,y); ctx.scale(s,s);
+  const C='#FF6F61';
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  for(let i=0;i<3;i++){ const yy=6+i*8; [-1,1].forEach(d=>{
+    ctx.strokeStyle=INK; ctx.lineWidth=5; ctx.beginPath(); ctx.moveTo(d*22,yy); ctx.lineTo(d*34,yy+5); ctx.lineTo(d*38,yy+15); ctx.stroke();
+    ctx.strokeStyle=C; ctx.lineWidth=2.5; ctx.beginPath(); ctx.moveTo(d*22,yy); ctx.lineTo(d*34,yy+5); ctx.lineTo(d*38,yy+15); ctx.stroke(); }); }
+  [-1,1].forEach(d=>{
+    ctx.strokeStyle=INK; ctx.lineWidth=6; ctx.beginPath(); ctx.moveTo(d*22,-6); ctx.lineTo(d*34,-18); ctx.stroke();
+    ctx.strokeStyle=C; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(d*22,-6); ctx.lineTo(d*34,-18); ctx.stroke();
+    ell(d*38,-24,10,8,d*0.5,C,INK);
+    ctx.strokeStyle=INK; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(d*40,-26); ctx.lineTo(d*46,-30); ctx.stroke();
+  });
+  ell(0,4,30,22,0,C,INK,3);
+  ell(0,10,18,10,0,'#FF9A8F');
+  [-1,1].forEach(d=>{ ctx.strokeStyle=INK; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(d*10,-14); ctx.lineTo(d*12,-26); ctx.stroke(); eye(d*12,-29,6); });
+  cheeks(0,4,16);
+  smile(0,4,6);
+  ctx.restore();
+}
+const FRIENDS = [
+  {name:'Zeezix', draw:drawZeezixMini},
+  {name:'Pip', draw:drawPip},
+  {name:'Coral', draw:drawCoral},
+  {name:'Lumi', draw:drawLumi},
+  {name:'Bubble', draw:drawOcto},
+  {name:'Grandpa Wave', draw:drawSeahorse},
+  {name:'Star', draw:drawStarfish},
+  {name:'Crab', draw:drawCrab},
+];
+
+/* ---------- Game state ---------- */
+let state = 'menu'; // 'menu' | 'play' | 'over'
+let paused = false;
+let round = 0, cards = [], open = [], lock = false, matchedCount = 0, parts = [];
+let cur = 0, kb = false, grid = {c:2, r:3};
+
+function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+function pairsForRound(r){ return r===0 ? 3 : r===1 ? 6 : 8; }
+function newRound(){
+  const n = pairsForRound(round);
+  const pick = shuffle(FRIENDS.map((f,i)=>i)).slice(0,n);
+  const ids = shuffle(pick.concat(pick));
+  cards = ids.map(id=>({id, face:0, up:false, matched:false, glow:0, x:0,y:0,w:0,h:0}));
+  open=[]; lock=false; matchedCount=0; cur=0; parts=[];
+  layout();
+  updateHud();
+}
+function layout(){
+  const n = cards.length;
+  const gap = Math.max(8, Math.min(14, W*0.02));
+  const top = SAFE_TOP + 68, bottom = H - sandHeight() - 6, left = 10, right = W-10;
+  const availW = right-left, availH = bottom-top;
+  const opts = ({6:[[2,3],[3,2]], 12:[[3,4],[4,3],[6,2]], 16:[[4,4],[8,2],[2,8]]})[n] || [[4,4]];
+  let best=null;
+  opts.forEach(([c,r])=>{
+    const cw = Math.min((availW-gap*(c-1))/c, (availH-gap*(r-1))/r/1.25, 200);
+    if(!best || cw>best.cw) best={c,r,cw};
+  });
+  grid = {c:best.c, r:best.r};
+  const cw = best.cw, ch = cw*1.25;
+  const gridW = best.c*cw + (best.c-1)*gap, gridH = best.r*ch + (best.r-1)*gap;
+  const ox = (W-gridW)/2, oy = top + (availH-gridH)/2;
+  cards.forEach((c,i)=>{ c.x = ox + (i%best.c)*(cw+gap); c.y = oy + Math.floor(i/best.c)*(ch+gap); c.w=cw; c.h=ch; });
+}
+function updateHud(){
+  document.getElementById('round').textContent = round+1;
+  document.getElementById('pairs').textContent = matchedCount;
+  document.getElementById('total').textContent = cards.length/2;
+}
+function sparkle(c){
+  const cx=c.x+c.w/2, cy=c.y+c.h/2;
+  for(let i=0;i<12;i++){
+    const a=Math.random()*Math.PI*2, sp=rnd(50,170);
+    parts.push({x:cx,y:cy,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-30,r:rnd(3,7),life:1,c:['#FFDC50','#fff','#FF82B4','#C8B6E2'][i%4],star:i%2===0});
+  }
+}
+function pick(c){
+  if(state!=='play' || paused || lock || !c || c.up || c.matched) return;
+  c.up = true; flipSound(); open.push(c);
+  if(open.length===2){
+    lock = true;
+    const [a,b] = open;
+    if(a.id===b.id){
+      setTimeout(()=>{
+        a.matched=b.matched=true; a.glow=b.glow=1; sparkle(a); sparkle(b); matchSound();
+        matchedCount++; save.pairs++; saveData(); open=[]; lock=false; updateHud();
+        if(matchedCount===cards.length/2) setTimeout(roundDone, 750);
+      }, 450);
+    } else {
+      setTimeout(()=>{ a.up=b.up=false; missSound(); open=[]; lock=false; }, 950);
+    }
+  }
+}
+function roundDone(){
+  state='over';
+  tadaSound();
+  round++; save.rounds++; saveData();
+  YTGame.sendScore(save.rounds);
+  document.getElementById('lifetime').textContent = save.rounds;
+  document.getElementById('endOverlay').style.display='flex';
+}
+function startGame(){
+  ensureAudio();
+  if(audioCtx && audioCtx.state==='suspended') audioCtx.resume();
+  round = 0;
+  newRound();
+  state='play';
+  document.getElementById('startOverlay').style.display='none';
+  document.getElementById('endOverlay').style.display='none';
+}
+function nextRound(){
+  newRound();
+  state='play';
+  document.getElementById('endOverlay').style.display='none';
+}
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('nextBtn').addEventListener('click', nextRound);
+
+function goToLauncher(){
+  saveData();
+  window.location.href = 'index.html';
+}
+document.getElementById('homeBtn').addEventListener('click', goToLauncher);   // end-overlay Home
+document.getElementById('homeFab').addEventListener('click', goToLauncher);   // persistent corner button
+
+// Parent-gated reset — wipes Reef Pairs progress only
+function resetThisGame(){
+  const a = 3 + Math.floor(Math.random()*7);
+  const b = 3 + Math.floor(Math.random()*7);
+  const answer = prompt('Parent gate — what is ' + a + ' × ' + b + '?');
+  if(answer === null) return;
+  if(parseInt(answer,10) !== a*b){ alert('That’s not quite right — nothing was changed.'); return; }
+  if(!confirm('Reset Reef Pairs progress (rounds done)?')) return;
+  try { localStorage.removeItem(SAVE_FALLBACK_KEY); } catch(e){}
+  save = {rounds:0, pairs:0};
+  saveData();
+  document.getElementById('lifetime').textContent = save.rounds;
+  alert('Reef Pairs reset. Tap Play to start fresh!');
+}
+const resetLink = document.getElementById('resetThisGame');
+if(resetLink) resetLink.addEventListener('click', resetThisGame);
+
+/* ---------- Input (one finger / mouse / keyboard) ---------- */
+function cardAt(px,py){ return cards.find(c=> px>=c.x && px<=c.x+c.w && py>=c.y && py<=c.y+c.h); }
+canvas.addEventListener('pointerdown', e=>{
+  kb = false;
+  const c = cardAt(e.clientX, e.clientY);
+  if(c){ cur = cards.indexOf(c); pick(c); }
+});
+canvas.addEventListener('contextmenu', e=>e.preventDefault());
+window.addEventListener('keydown', e=>{
+  if(state!=='play') return;
+  const k = e.key;
+  let moved = true;
+  if(k==='ArrowLeft'||k==='a') cur = Math.max(0, cur-1);
+  else if(k==='ArrowRight'||k==='d') cur = Math.min(cards.length-1, cur+1);
+  else if(k==='ArrowUp'||k==='w') cur = Math.max(0, cur-grid.c);
+  else if(k==='ArrowDown'||k==='s') cur = Math.min(cards.length-1, cur+grid.c);
+  else moved = false;
+  if(moved){ kb = true; e.preventDefault(); return; }
+  if(k===' '||k==='Enter'){ kb = true; pick(cards[cur]); e.preventDefault(); }
+});
+
+/* Pause on blur / YouTube onPause */
+YTGame.onPause(()=>{ paused=true; });
+YTGame.onResume(()=>{ paused=false; });
+// YouTube audio settings respect
+muted = !YTGame.initialAudioEnabled();
+muteBtn.textContent = muted ? '🔇' : '🔊';
+YTGame.onAudioChange((enabled)=>{
+  muted = !enabled;
+  muteBtn.textContent = muted ? '🔇' : '🔊';
+});
+
+/* ---------- Drawing ---------- */
+function drawWater(){
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#B6ECFF'); g.addColorStop(0.45,'#5FBCF0'); g.addColorStop(1,'#2F8FD6');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  ctx.save(); ctx.globalAlpha=0.12; ctx.fillStyle='#fff';
+  for(let i=0;i<5;i++){
+    const x=(i+0.5)*W/5 + Math.sin(t*0.4+i)*24;
+    ctx.beginPath(); ctx.moveTo(x-16,0); ctx.lineTo(x+16,0); ctx.lineTo(x+80,H*0.75); ctx.lineTo(x-70,H*0.75); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+  ctx.fillStyle='rgba(255,255,255,0.35)';
+  reef.bg.forEach(b=>{
+    b.y -= b.v*lastDt; if(b.y < -10){ b.y = H+10; b.x = rnd(0,W); }
+    ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2); ctx.fill();
+  });
+  const sh = sandHeight();
+  ctx.lineCap='round';
+  reef.weeds.forEach(w=>{
+    ctx.strokeStyle=w.c; ctx.lineWidth=6;
+    const sway = Math.sin(t*1.2+w.ph)*8;
+    ctx.beginPath(); ctx.moveTo(w.x, H-sh+8);
+    ctx.quadraticCurveTo(w.x+sway*1.5, H-sh-w.h*0.5, w.x+sway, H-sh-w.h);
+    ctx.stroke();
+  });
+  ctx.fillStyle='#F6E3A1';
+  ctx.beginPath(); ctx.moveTo(0,H); ctx.lineTo(0,H-sh);
+  for(let x=0;x<=W;x+=40){ ctx.quadraticCurveTo(x+20, H-sh-8, x+40, H-sh); }
+  ctx.lineTo(W+40,H); ctx.closePath(); ctx.fill();
+}
+function drawShell(x,y,r){
+  ctx.save(); ctx.translate(x,y);
+  ctx.fillStyle='#C8B6E2'; ctx.strokeStyle='#4A2384'; ctx.lineWidth=2; ctx.lineJoin='round';
+  const n=7;
+  ctx.beginPath(); ctx.moveTo(0, r*0.8); ctx.lineTo(-r,0);
+  for(let i=0;i<n;i++){
+    const a0=Math.PI + (i/n)*Math.PI, a1=Math.PI + ((i+1)/n)*Math.PI, am=(a0+a1)/2;
+    ctx.quadraticCurveTo(Math.cos(am)*r*1.12, Math.sin(am)*r*1.12, Math.cos(a1)*r, Math.sin(a1)*r);
+  }
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  for(let i=1;i<n;i++){ const a=Math.PI + (i/n)*Math.PI; ctx.beginPath(); ctx.moveTo(0,r*0.8); ctx.lineTo(Math.cos(a)*r, Math.sin(a)*r); ctx.stroke(); }
+  star(0,-r*0.1,r*0.22,'#FFDC50','#4A2384');
+  ctx.restore();
+}
+function drawCard(c, i){
+  const cx = c.x + c.w/2, cy = c.y + c.h/2;
+  const sx = Math.abs(Math.cos(c.face*Math.PI));
+  const showFront = c.face > 0.5;
+  const w=c.w, h=c.h, r=Math.min(18, w*0.12);
+  ctx.save(); ctx.translate(cx,cy);
+  const lift = c.matched ? 1 + 0.025*Math.sin(t*3 + i) : 1;
+  ctx.scale(Math.max(0.03,sx)*lift, lift);
+  ctx.fillStyle='rgba(0,0,0,0.18)'; rr(-w/2+3, -h/2+6, w, h, r); ctx.fill();
+  if(!showFront){
+    const g=ctx.createLinearGradient(0,-h/2,0,h/2); g.addColorStop(0,'#8B5CF6'); g.addColorStop(1,'#5B2D9B');
+    ctx.fillStyle=g; rr(-w/2,-h/2,w,h,r); ctx.fill();
+    ctx.strokeStyle='#C8B6E2'; ctx.lineWidth=3; rr(-w/2+5,-h/2+5,w-10,h-10,Math.max(4,r-4)); ctx.stroke();
+    drawShell(0, 2, Math.min(w,h)*0.3);
+  } else {
+    ctx.fillStyle='#FFFDF5'; rr(-w/2,-h/2,w,h,r); ctx.fill();
+    ctx.strokeStyle = c.matched ? '#FFDC50' : '#C8B6E2'; ctx.lineWidth = c.matched ? 5 : 3;
+    rr(-w/2+2,-h/2+2,w-4,h-4,Math.max(4,r-2)); ctx.stroke();
+    const f = FRIENDS[c.id]; const s = Math.min(w*0.92, h*0.7)/110;
+    f.draw(0, -h*0.1, s);
+    let fs = Math.max(11, Math.min(20, w*0.15));
+    ctx.font = 'bold '+fs+'px system-ui,-apple-system,Arial,sans-serif';
+    while(ctx.measureText(f.name).width > w-12 && fs>9){ fs--; ctx.font='bold '+fs+'px system-ui,-apple-system,Arial,sans-serif'; }
+    ctx.fillStyle='#5B2D9B'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(f.name, 0, h*0.37);
+  }
+  ctx.restore();
+  if(kb && i===cur && state==='play'){
+    ctx.save(); ctx.strokeStyle='#FFDC50'; ctx.lineWidth=5; rr(c.x-5,c.y-5,c.w+10,c.h+10,r+4); ctx.stroke(); ctx.restore();
+  }
+}
+function drawParts(){
+  parts.forEach(p=>{
+    ctx.globalAlpha = Math.max(0,p.life);
+    if(p.star) star(p.x,p.y,p.r,p.c);
+    else { ctx.fillStyle=p.c; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); }
+  });
+  ctx.globalAlpha=1;
+}
+
+/* ---------- Update ---------- */
+let last = performance.now();
+function frame(now){
+  const dt = Math.min(0.04, (now-last)/1000);
+  last = now; lastDt = dt; t += dt;
+  if(!paused) update(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+function update(dt){
+  cards.forEach(c=>{
+    const dir = c.up ? 1 : -1;
+    c.face = Math.max(0, Math.min(1, c.face + dir*dt*4.5));
+    if(c.glow>0) c.glow -= dt;
+  });
+  parts.forEach(p=>{ p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=160*dt; p.life-=dt*1.5; });
+  parts = parts.filter(p=>p.life>0);
+}
+function draw(){
+  drawWater();
+  cards.forEach(drawCard);
+  drawParts();
+}
+requestAnimationFrame(frame);
+
+/* iOS audio unlock on first touch */
+document.addEventListener('pointerdown', ()=>{ ensureAudio(); if(audioCtx && audioCtx.state==='suspended') audioCtx.resume(); }, {once:true});
+
+/* Boot: load save data, signal Playables, mark ready to play */
+(async function boot(){
+  await bootSave();
+  // First frame about to draw — notify YouTube
+  requestAnimationFrame(()=>{
+    YTGame.firstFrameReady();
+    // We're interactable as soon as the menu overlay is up (which it already is)
+    YTGame.gameReady();
+  });
+})();
+</script>
+</body>
+</html>

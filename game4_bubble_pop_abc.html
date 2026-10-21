@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+<title>Bubble Pop ABC</title>
+<!-- YouTube Playables SDK (loads only inside the Playables environment; otherwise script 404s and bridge no-ops). -->
+<script src="https://www.youtube.com/game_api/v1" onerror="window.__ytGameLoadFailed=true"></script>
+<style>
+  html,body{margin:0;padding:0;background:#5fbcf0;overflow:hidden;
+    font-family:system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+    user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;
+    touch-action:none;height:100%;min-height:100svh;width:100%;}
+  body{height:100svh;}
+  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;}
+  canvas{display:block;background:#5fbcf0;}
+  #probe{position:fixed;top:0;left:0;width:0;height:0;padding-top:env(safe-area-inset-top,0px);visibility:hidden;pointer-events:none;}
+  /* Home button visible during gameplay */
+  #homeFab{position:fixed;top:calc(10px + env(safe-area-inset-top,0));left:10px;width:46px;height:46px;
+    border-radius:999px;background:rgba(255,255,255,.92);color:#222;border:none;font-size:20px;
+    cursor:pointer;z-index:10;box-shadow:0 2px 0 rgba(0,0,0,.15);}
+  #homeFab:active{transform:translateY(2px);box-shadow:0 0 0 rgba(0,0,0,.15);}
+  #muteBtn{position:fixed;top:calc(10px + env(safe-area-inset-top,0));right:10px;width:46px;height:46px;border-radius:999px;
+           background:rgba(255,255,255,.9);border:none;font-size:20px;cursor:pointer;z-index:10;}
+  .hud{position:fixed;top:calc(70px + env(safe-area-inset-top,0));left:14px;right:14px;display:flex;justify-content:space-between;
+       pointer-events:none;font-weight:700;color:#fff;text-shadow:0 2px 0 rgba(0,0,0,.25);
+       font-size:22px;z-index:5;}
+  .hud .pill{background:rgba(0,0,0,.25);padding:8px 14px;border-radius:999px;}
+  .btn{pointer-events:auto;background:#fff;color:#333;border:none;border-radius:999px;
+       padding:10px 14px;font-weight:800;font-size:18px;box-shadow:0 4px 0 rgba(0,0,0,.15);
+       cursor:pointer;}
+  .btn:active{transform:translateY(2px);box-shadow:0 2px 0 rgba(0,0,0,.15);}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;
+           justify-content:center;flex-direction:column;color:#fff;text-align:center;z-index:20;
+           padding:20px;}
+  .overlay h1{font-size:44px;margin:0 0 8px;text-shadow:0 4px 0 rgba(0,0,0,.3);}
+  .overlay p{font-size:20px;margin:6px 0 18px;opacity:.95;}
+  .overlay .big{font-size:34px;background:#fff;color:#5B2D9B;padding:18px 30px;border-radius:999px;
+       border:none;font-weight:900;cursor:pointer;box-shadow:0 6px 0 rgba(0,0,0,.25);}
+  .overlay .big:active{transform:translateY(3px);box-shadow:0 3px 0 rgba(0,0,0,.25);}
+  .resetLink{margin-top:6px;background:transparent;border:none;color:rgba(255,255,255,.55);font-size:11px;text-decoration:underline;cursor:pointer;padding:6px 10px;}
+  .abc{font-size:28px;letter-spacing:6px;margin:0 0 10px;color:#FFDC50;font-weight:900;text-shadow:0 3px 0 rgba(0,0,0,.3);}
+</style>
+</head>
+<body>
+<div id="probe"></div>
+<div id="wrap"><canvas id="c"></canvas></div>
+<button id="homeFab" aria-label="All games (Zeezix)">⭐</button>
+<div class="hud">
+  <div class="pill">⭐ <span id="score">0</span></div>
+</div>
+<button id="muteBtn" aria-label="Mute">🔊</button>
+
+<div id="startOverlay" class="overlay">
+  <h1>Bubble Pop ABC</h1>
+  <div class="abc">A B C</div>
+  <p>Tap the letter!</p>
+  <button class="big" id="startBtn">▶ Play</button>
+  <p style="font-size:14px;opacity:.8;margin-top:14px;">Pops: <span id="lifetime">0</span> · Next: <span id="nextLabel">A</span></p>
+  <button id="resetThisGame" class="resetLink">⚙ Parents: reset this game</button>
+</div>
+
+<div id="endOverlay" class="overlay" style="display:none">
+  <h1>Ta-da!</h1>
+  <p>A to Z! You did it!</p>
+  <p>You popped <strong><span id="finalPops">0</span></strong> ⭐</p>
+  <button class="big" id="againBtn">▶ Play Again</button>
+  <button class="btn" id="homeBtn" style="margin-top:14px">🏠 Home</button>
+</div>
+
+<script>
+/* =================================================================
+   Bubble Pop ABC — single-file HTML5 game for YouTube Playables.
+   No external assets. No network calls. No timer, no lives.
+   ================================================================= */
+
+/* ----------------------------------------------------------------
+   YouTube Playables SDK Bridge
+   Safely wraps ytgame.* APIs. No-ops if SDK is absent or fails to
+   load, so the game still plays on any host (Netlify, file://, etc.)
+   ---------------------------------------------------------------- */
+const SAVE_FALLBACK_KEY = 'bubble_pop_abc_v1';
+const YTGame = (() => {
+  const hasSdk = typeof ytgame !== 'undefined';
+  const inPlayables = hasSdk && !!ytgame.IN_PLAYABLES_ENV;
+  const safe = (fn) => { try { return fn(); } catch(e){ return undefined; } };
+  return {
+    hasSdk, inPlayables,
+    firstFrameReady(){ if(hasSdk) safe(()=>ytgame.game.firstFrameReady()); },
+    gameReady(){ if(hasSdk) safe(()=>ytgame.game.gameReady()); },
+    saveData(obj){
+      const s = JSON.stringify(obj);
+      if(inPlayables){ safe(()=>ytgame.game.saveData(s)); }
+      try{ localStorage.setItem(SAVE_FALLBACK_KEY, s); }catch(e){}
+    },
+    async loadData(fallback){
+      if(inPlayables){
+        try{ const s = await ytgame.game.loadData(); if(s) return JSON.parse(s); }catch(e){}
+      }
+      try{ const s = localStorage.getItem(SAVE_FALLBACK_KEY); if(s) return JSON.parse(s); }catch(e){}
+      return fallback;
+    },
+    sendScore(value){
+      if(inPlayables && typeof value === 'number' && isFinite(value)){
+        safe(()=>ytgame.engagement.sendScore({value: Math.floor(value)}));
+      }
+    },
+    onPause(cb){
+      if(hasSdk) safe(()=>ytgame.system.onPause(cb));
+      window.addEventListener('blur', cb);
+      document.addEventListener('visibilitychange', ()=>{ if(document.hidden) cb(); });
+    },
+    onResume(cb){
+      if(hasSdk) safe(()=>ytgame.system.onResume(cb));
+      window.addEventListener('focus', cb);
+      document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) cb(); });
+    },
+    initialAudioEnabled(){
+      if(hasSdk){ const v = safe(()=>ytgame.system.isAudioEnabled()); if(typeof v === 'boolean') return v; }
+      return true;
+    },
+    onAudioChange(cb){
+      if(hasSdk) safe(()=>ytgame.system.onAudioEnabledChange(cb));
+    },
+    logError(msg){ if(hasSdk) safe(()=>ytgame.health.logError()); if(msg) console.warn('[bubble]', msg); },
+  };
+})();
+window.addEventListener('error', e => YTGame.logError(e && e.message));
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const probe = document.getElementById('probe');
+const INK = '#2d2a26';
+
+let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2), SAFE_TOP = 0;
+let reef = {weeds:[], corals:[], bg:[]};
+function rnd(a,b){ return a + Math.random()*(b-a); }
+function sandHeight(){ return Math.max(40, Math.min(90, H*0.11)); }
+function buildReef(){
+  reef.weeds = []; reef.corals = []; reef.bg = [];
+  const nW = Math.ceil(W/80);
+  for(let i=0;i<nW;i++) reef.weeds.push({x:(i+rnd(0.2,0.8))*80, h:rnd(50,110), ph:rnd(0,6.28), c:['#7ED957','#4CC94C','#A6E86A'][i%3]});
+  const nC = Math.ceil(W/150);
+  for(let i=0;i<nC;i++) reef.corals.push({x:(i+rnd(0.2,0.8))*150, s:rnd(0.7,1.2), k:i%3, c:['#FF82B4','#FFB04C','#FF6F91'][i%3]});
+  for(let i=0;i<16;i++) reef.bg.push({x:rnd(0,W), y:rnd(0,H), r:rnd(2,6), v:rnd(12,30)});
+}
+function resize(){
+  const vv = window.visualViewport;
+  W = window.innerWidth;
+  // Use visualViewport.height when available (iOS Safari) so we stay inside the actually-visible area.
+  H = vv ? Math.round(vv.height) : window.innerHeight;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  SAFE_TOP = parseFloat(getComputedStyle(probe).paddingTop) || 0;
+  buildReef();
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', resize);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', resize);
+  window.visualViewport.addEventListener('scroll', resize);
+}
+resize();
+
+/* ---------- Audio (WebAudio, generated on the fly) ---------- */
+let audioCtx = null, muted = false;
+function ensureAudio(){
+  if(!audioCtx){
+    try{ audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){}
+  }
+}
+function blip(freq, dur, type='sine', vol=0.18, delay=0){
+  if(!audioCtx || muted) return;
+  const t0 = audioCtx.currentTime + delay;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.linearRampToValueAtTime(vol, t0+0.012);
+  g.gain.exponentialRampToValueAtTime(0.001, t0+dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(t0); o.stop(t0+dur+0.03);
+}
+function popSound(){ blip(880,0.12,'triangle',0.2); blip(1320,0.2,'triangle',0.16,0.07); }
+function wobbleSound(){ blip(320,0.12,'sine',0.12); blip(270,0.16,'sine',0.1,0.1); }
+function tapSound(){ blip(620,0.05,'sine',0.05); }
+function tadaSound(){ [523,659,784,1046,1318].forEach((f,i)=>blip(f,0.24,'triangle',0.18,i*0.1)); }
+
+const muteBtn = document.getElementById('muteBtn');
+muteBtn.addEventListener('click', ()=>{
+  muted = !muted;
+  muteBtn.textContent = muted ? '🔇' : '🔊';
+});
+
+/* ---------- Persistence (Playables saveData + localStorage fallback) ---------- */
+let save = {pops:0, index:0, done:0};
+function saveData(){ YTGame.saveData(save); }
+async function bootSave(){
+  const loaded = await YTGame.loadData({});
+  save = Object.assign({pops:0, index:0, done:0}, loaded || {});
+  if(!(save.index >= 0 && save.index < SEQ.length)) save.index = 0;
+  refreshMenu();
+}
+function refreshMenu(){
+  document.getElementById('lifetime').textContent = save.pops;
+  document.getElementById('nextLabel').textContent = SEQ[save.index].v;
+}
+
+/* ---------- Letter / number sequence ---------- */
+const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+const SEQ = [];
+(function(){
+  const numAfter = {F:['1','2','3'], L:['4','5','6'], R:['7','8','9'], X:['10']};
+  LETTERS.forEach(L=>{ SEQ.push({n:false, v:L}); (numAfter[L]||[]).forEach(d=>SEQ.push({n:true, v:d})); });
+})();
+
+/* ---------- Game state ---------- */
+let state = 'menu'; // 'menu' | 'play' | 'over'
+let paused = false, t = 0, lastDt = 0.016;
+let idx = 0, bubbles = [], parts = [], ripples = [], spawnT = 0, popped = 0;
+let say = '', sayT = 0, mood = 'happy', flash = 0;
+const TINTS = ['#5B2D9B','#E0457B','#1B7FC4','#2E9E4F','#D9780F'];
+
+function target(){ return SEQ[Math.min(idx, SEQ.length-1)]; }
+function bubbleR(){ return Math.max(30, Math.min(52, Math.min(W,H)*0.075)); }
+function maxBubbles(){ return Math.max(4, Math.min(8, Math.floor(W*H/70000))); }
+function distractor(){
+  const tg = target();
+  if(tg.n){ let d; do { d = String(1+Math.floor(Math.random()*10)); } while(d===tg.v); return d; }
+  const i = LETTERS.indexOf(tg.v); let j;
+  do { j = Math.random()<0.6 ? Math.max(0,Math.min(25, i + Math.round(rnd(-4,4)))) : Math.floor(Math.random()*26); } while(j===i);
+  return LETTERS[j];
+}
+function zeezixScale(){ return Math.max(0.6, Math.min(1.1, Math.min(W,H)*0.0022)); }
+function spawnBubble(isTarget, y){
+  const r = bubbleR();
+  const yy = (y===undefined ? H + r + rnd(0,30) : y);
+  // Keep bubbles out of Zeezix's corner, and pick the least crowded spot of a few tries.
+  const left = Math.min(W*0.45, 16 + 110*zeezixScale()) + r, right = W - r - 8;
+  let bx = rnd(left, right), bestD = -1;
+  for(let i=0;i<8;i++){
+    const cx = rnd(left, right);
+    let d = 1e9;
+    bubbles.forEach(b=>{ if(Math.abs(b.y - yy) < r*4) d = Math.min(d, Math.abs(b.x - cx)); });
+    if(d > bestD){ bestD = d; bx = cx; }
+  }
+  bubbles.push({ x: bx, y: yy, r,
+    vy: -rnd(0.045,0.07)*H, ph: rnd(0,6.28), sw: rnd(8,16), label: isTarget ? target().v : distractor(),
+    tint: TINTS[Math.floor(Math.random()*TINTS.length)], wob:0, dead:false, born:0 });
+}
+function setSay(){ say = 'Find ' + target().v + '!'; sayT = 0; mood = 'happy'; }
+
+function startGame(){
+  ensureAudio();
+  if(audioCtx && audioCtx.state==='suspended') audioCtx.resume();
+  idx = (save.index>=0 && save.index < SEQ.length) ? save.index : 0;
+  bubbles=[]; parts=[]; ripples=[]; popped=0; spawnT=0.6; flash=0;
+  // Seed a few bubbles already on screen so it's playable instantly.
+  const n = Math.min(maxBubbles(), 5);
+  for(let i=0;i<n;i++) spawnBubble(i===0, rnd(H*0.3, H*0.85));
+  setSay();
+  state='play';
+  document.getElementById('score').textContent = popped;
+  document.getElementById('startOverlay').style.display='none';
+  document.getElementById('endOverlay').style.display='none';
+}
+
+function popBubble(b){
+  b.dead = true; popped++; save.pops++;
+  document.getElementById('score').textContent = popped;
+  popSound();
+  for(let i=0;i<14;i++){
+    const a = Math.random()*Math.PI*2, sp = rnd(60,220);
+    parts.push({x:b.x,y:b.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-40,r:rnd(3,7),life:1,c:['#FFDC50','#fff','#FF82B4','#C8B6E2'][i%4],star:i%3===0,rot:rnd(0,6)});
+  }
+  flash = 1;
+  idx++;
+  if(idx >= SEQ.length){
+    save.index = 0; save.done++; saveData();
+    say='Ta-da!'; sayT=0; mood='yay';
+    setTimeout(finishGame, 900);
+  } else {
+    save.index = idx; saveData();
+    say='Yay!'; sayT=0; mood='yay';
+    setTimeout(()=>{ if(state==='play') setSay(); }, 700);
+  }
+}
+
+function finishGame(){
+  state='over';
+  tadaSound();
+  YTGame.sendScore(save.pops);
+  document.getElementById('finalPops').textContent = popped;
+  document.getElementById('endOverlay').style.display='flex';
+  refreshMenu();
+}
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('againBtn').addEventListener('click', startGame);
+
+// Always-to-launcher: progress is saved on every pop, so nothing is lost.
+function goToLauncher(){
+  saveData();
+  window.location.href = 'index.html';
+}
+document.getElementById('homeBtn').addEventListener('click', goToLauncher);   // end-overlay Home
+document.getElementById('homeFab').addEventListener('click', goToLauncher);   // persistent corner button
+
+// Parent-gated reset — wipes Bubble Pop ABC progress only
+function resetThisGame(){
+  const a = 3 + Math.floor(Math.random()*7);
+  const b = 3 + Math.floor(Math.random()*7);
+  const answer = prompt('Parent gate — what is ' + a + ' × ' + b + '?');
+  if(answer === null) return;
+  if(parseInt(answer,10) !== a*b){ alert('That’s not quite right — nothing was changed.'); return; }
+  if(!confirm('Reset Bubble Pop ABC progress (pops and letter position)?')) return;
+  try { localStorage.removeItem(SAVE_FALLBACK_KEY); } catch(e){}
+  save = {pops:0, index:0, done:0};
+  saveData();
+  refreshMenu();
+  alert('Bubble Pop ABC reset. Tap Play to start fresh!');
+}
+const resetLink = document.getElementById('resetThisGame');
+if(resetLink) resetLink.addEventListener('click', resetThisGame);
+
+/* ---------- Input (one finger / mouse / keyboard) ---------- */
+function liveBubbles(){ return bubbles.filter(b=>!b.dead && b.y < H + b.r && b.y > -b.r); }
+function pointAt(px,py){
+  if(state!=='play' || paused) return;
+  const tv = target().v;
+  let hit=null, best=1e9;
+  for(const b of bubbles){
+    if(b.dead) continue;
+    const d=Math.hypot(px-b.x,py-b.y);
+    if(d < b.r*1.3){ const sc=(b.label===tv?0:1e4)+d; if(sc<best){best=sc;hit=b;} }
+  }
+  if(!hit){ ripples.push({x:px,y:py,r:6,life:1}); tapSound(); return; }
+  if(hit.label===tv) popBubble(hit);
+  else { hit.wob = 0.7; wobbleSound(); }   // wrong bubble just wobbles — no penalty
+}
+canvas.addEventListener('pointerdown', e=>{ pointAt(e.clientX, e.clientY); });
+canvas.addEventListener('contextmenu', e=>e.preventDefault());
+window.addEventListener('keydown', e=>{
+  if(state!=='play' || paused) return;
+  const k = e.key.length===1 ? e.key.toUpperCase() : e.key;
+  const tv = target().v;
+  const live = liveBubbles();
+  if(k===' ' || k==='Enter' || k===tv || (tv==='10' && (k==='1'||k==='0'))){
+    const b = live.find(b=>b.label===tv); if(b) popBubble(b);
+    e.preventDefault(); return;
+  }
+  if(/^[A-Z0-9]$/.test(k)){ const b = live.find(b=>b.label===k); if(b){ b.wob=0.7; wobbleSound(); } }
+});
+
+/* Pause on blur / YouTube onPause */
+YTGame.onPause(()=>{ paused=true; });
+YTGame.onResume(()=>{ paused=false; });
+// YouTube audio settings respect
+muted = !YTGame.initialAudioEnabled();
+muteBtn.textContent = muted ? '🔇' : '🔊';
+YTGame.onAudioChange((enabled)=>{
+  muted = !enabled;
+  muteBtn.textContent = muted ? '🔇' : '🔊';
+});
+
+/* ---------- Draw helpers ---------- */
+function ell(x,y,rx,ry,rot,fill,stroke,lw){
+  ctx.beginPath(); ctx.ellipse(x,y,rx,ry,rot||0,0,Math.PI*2);
+  ctx.fillStyle=fill; ctx.fill();
+  if(stroke){ ctx.strokeStyle=stroke; ctx.lineWidth=lw||2.5; ctx.stroke(); }
+}
+function star(x,y,r,fill,stroke){
+  ctx.beginPath();
+  for(let i=0;i<10;i++){ const a=-Math.PI/2 + i*Math.PI/5; const rr = i%2===0? r : r*0.45; ctx.lineTo(x+Math.cos(a)*rr, y+Math.sin(a)*rr); }
+  ctx.closePath(); ctx.fillStyle=fill; ctx.fill();
+  if(stroke){ ctx.strokeStyle=stroke; ctx.lineWidth=2; ctx.lineJoin='round'; ctx.stroke(); }
+}
+function roundRect(x,y,w,h,r){
+  ctx.beginPath(); ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h); ctx.lineTo(x+r,y+h);
+  ctx.quadraticCurveTo(x,y+h,x,y+h-r); ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath();
+}
+function eye(x,y,r,iris){
+  ell(x,y,r,r,0,'#fff',INK,2);
+  ell(x+r*0.15,y+r*0.1,r*0.55,r*0.55,0,iris||'#7C3AED');
+  ell(x+r*0.15,y+r*0.1,r*0.3,r*0.3,0,INK);
+  ell(x+r*0.35,y-r*0.25,r*0.2,r*0.2,0,'#fff');
+}
+
+function drawWater(){
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#B6ECFF'); g.addColorStop(0.45,'#5FBCF0'); g.addColorStop(1,'#2F8FD6');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  // light rays
+  ctx.save(); ctx.globalAlpha=0.12; ctx.fillStyle='#fff';
+  for(let i=0;i<5;i++){
+    const x=(i+0.5)*W/5 + Math.sin(t*0.4+i)*24;
+    ctx.beginPath(); ctx.moveTo(x-16,0); ctx.lineTo(x+16,0); ctx.lineTo(x+80,H*0.75); ctx.lineTo(x-70,H*0.75); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+  // tiny background bubbles
+  ctx.fillStyle='rgba(255,255,255,0.35)';
+  reef.bg.forEach(b=>{
+    b.y -= b.v*lastDt; if(b.y < -10){ b.y = H+10; b.x = rnd(0,W); }
+    ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2); ctx.fill();
+  });
+}
+function drawReef(){
+  const sh = sandHeight();
+  // seaweed
+  ctx.lineCap='round';
+  reef.weeds.forEach(w=>{
+    ctx.strokeStyle=w.c; ctx.lineWidth=7;
+    const sway = Math.sin(t*1.2+w.ph)*10;
+    ctx.beginPath(); ctx.moveTo(w.x, H-sh+10);
+    ctx.quadraticCurveTo(w.x+sway*1.5, H-sh-w.h*0.5, w.x+sway, H-sh-w.h);
+    ctx.stroke();
+  });
+  // corals
+  reef.corals.forEach(c=>{
+    const bx=c.x, by=H-sh+6, s=c.s;
+    ctx.fillStyle=c.c;
+    if(c.k===0){
+      [[0,-30],[-18,-18],[18,-20],[-8,-44],[10,-46],[0,-10]].forEach(p=>{ ctx.beginPath(); ctx.arc(bx+p[0]*s, by+p[1]*s, 13*s, 0, Math.PI*2); ctx.fill(); });
+    } else if(c.k===1){
+      ctx.beginPath(); ctx.ellipse(bx,by,34*s,24*s,0,Math.PI,0); ctx.fill();
+      ctx.strokeStyle='rgba(255,255,255,0.35)'; ctx.lineWidth=3;
+      ctx.beginPath(); ctx.arc(bx,by,22*s,Math.PI*1.1,Math.PI*1.9); ctx.stroke();
+    } else {
+      ctx.strokeStyle=c.c; ctx.lineWidth=9*s;
+      ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx,by-30*s); ctx.lineTo(bx-16*s,by-52*s);
+      ctx.moveTo(bx,by-30*s); ctx.lineTo(bx+18*s,by-50*s); ctx.moveTo(bx,by-18*s); ctx.lineTo(bx+12*s,by-30*s); ctx.stroke();
+    }
+  });
+  // sand
+  ctx.fillStyle='#F6E3A1';
+  ctx.beginPath(); ctx.moveTo(0,H); ctx.lineTo(0,H-sh);
+  for(let x=0;x<=W;x+=40){ ctx.quadraticCurveTo(x+20, H-sh-8, x+40, H-sh); }
+  ctx.lineTo(W+40,H); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,0.06)';
+  for(let x=20;x<W;x+=70){ ctx.beginPath(); ctx.arc(x, H-sh*0.5, 3, 0, Math.PI*2); ctx.fill(); }
+}
+
+function drawZeezix(x,y,s,moodNow){
+  ctx.save(); ctx.translate(x, y + Math.sin(t*2)*3*s); ctx.scale(s,s);
+  // antenna + glowing star
+  ctx.strokeStyle=INK; ctx.lineWidth=3; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(0,-40); ctx.quadraticCurveTo(-10,-60,2,-74); ctx.stroke();
+  ctx.save(); ctx.globalAlpha=0.35+0.15*Math.sin(t*5); ctx.fillStyle='#FFDC50';
+  ctx.beginPath(); ctx.arc(2,-80,16,0,Math.PI*2); ctx.fill(); ctx.restore();
+  star(2,-80,9,'#FFDC50',INK);
+  // fins
+  ell(-42,8,13,8,-0.4,'#9c64f2',INK); ell(42,8,13,8,0.4,'#9c64f2',INK);
+  ell(-16,42,13,6,0,'#5B2D9B',INK); ell(16,42,13,6,0,'#5B2D9B',INK);
+  // body + belly
+  const g=ctx.createLinearGradient(0,-42,0,42); g.addColorStop(0,'#A87FF5'); g.addColorStop(1,'#5B2D9B');
+  ell(0,0,36,42,0,g,INK,3);
+  ell(0,18,20,15,0,'#FF9EC6');
+  // eyes
+  eye(-13,-12,10); eye(13,-12,10);
+  // cheeks
+  ell(-24,0,4,3,0,'#FF82B4'); ell(24,0,4,3,0,'#FF82B4');
+  // mouth
+  ctx.strokeStyle=INK; ctx.lineWidth=2.5;
+  if(moodNow==='yay'){ ctx.fillStyle='#3a1a2a'; ctx.beginPath(); ctx.ellipse(0,8,8,6,0,0,Math.PI); ctx.fill(); ctx.stroke(); }
+  else { ctx.beginPath(); ctx.arc(0,4,7,0.15,Math.PI-0.15); ctx.stroke(); }
+  ctx.restore();
+}
+function speech(cx,y,text,s){
+  // Speech bubble centered on cx, bottom edge at y, tail pointing down.
+  ctx.save();
+  ctx.font = 'bold ' + Math.round(22*s) + 'px system-ui,-apple-system,Arial,sans-serif';
+  const w = ctx.measureText(text).width + 28*s, h = 40*s;
+  const x = Math.max(6, Math.min(W - w - 6, cx - w/2));
+  ctx.fillStyle='#fff'; ctx.strokeStyle=INK; ctx.lineWidth=2.5; ctx.lineJoin='round';
+  roundRect(x, y-h, w, h, 14*s); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx-9*s, y-3); ctx.lineTo(cx, y+12*s); ctx.lineTo(cx+9*s, y-3); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(cx-9*s, y-1); ctx.lineTo(cx, y+12*s); ctx.lineTo(cx+9*s, y-1); ctx.stroke();
+  ctx.fillStyle='#5B2D9B'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(text, x+w/2, y-h/2+1);
+  ctx.restore();
+}
+function drawZeezixScene(){
+  const sh = sandHeight();
+  const s = zeezixScale();
+  const x = 16 + 50*s, y = H - sh*0.55 - 44*s;
+  drawZeezix(x,y,s,mood);
+  if(say){
+    const pop = Math.min(1, sayT*5);
+    ctx.save(); ctx.globalAlpha = pop;
+    speech(x + 6*s, y - 108*s, say, s*(0.8+0.2*pop));
+    ctx.restore();
+  }
+}
+function drawBubble(b){
+  const tv = target().v;
+  ctx.save(); ctx.translate(b.x,b.y);
+  const w = b.wob>0 ? Math.sin(b.wob*30)*0.14*b.wob : 0;
+  const pop = Math.min(1, b.born*4);
+  ctx.rotate(w); ctx.scale((1+w*0.5)*pop, (1-w*0.5)*pop);
+  const g = ctx.createRadialGradient(-b.r*0.3,-b.r*0.3,b.r*0.1,0,0,b.r);
+  g.addColorStop(0,'rgba(255,255,255,0.78)'); g.addColorStop(0.7,'rgba(225,246,255,0.5)'); g.addColorStop(1,'rgba(205,238,255,0.7)');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(0,0,b.r,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle = (b.label===tv && flash<=0) ? 'rgba(255,220,80,0.95)' : 'rgba(255,255,255,0.9)';
+  ctx.lineWidth=3; ctx.stroke();
+  ctx.fillStyle='rgba(255,255,255,0.85)';
+  ctx.beginPath(); ctx.ellipse(-b.r*0.4,-b.r*0.45,b.r*0.16,b.r*0.1,-0.6,0,Math.PI*2); ctx.fill();
+  const fs = b.label.length>1 ? b.r*0.95 : b.r*1.15;
+  ctx.font = '900 ' + Math.round(fs) + 'px system-ui,-apple-system,Arial,sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.lineWidth=5; ctx.strokeStyle='#fff'; ctx.lineJoin='round'; ctx.strokeText(b.label,0,2);
+  ctx.fillStyle=b.tint; ctx.fillText(b.label,0,2);
+  ctx.restore();
+}
+function drawParts(){
+  parts.forEach(p=>{
+    ctx.globalAlpha = Math.max(0,p.life);
+    if(p.star){ star(p.x,p.y,p.r,p.c); }
+    else { ctx.fillStyle=p.c; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); }
+  });
+  ctx.globalAlpha=1;
+  ripples.forEach(r=>{
+    ctx.globalAlpha = Math.max(0,r.life)*0.7; ctx.strokeStyle='#fff'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(r.x,r.y,r.r,0,Math.PI*2); ctx.stroke();
+  });
+  ctx.globalAlpha=1;
+}
+function drawTargetBadge(){
+  if(state==='menu') return;
+  const tg = target();
+  const r = 36, x = W/2, y = SAFE_TOP + 46;
+  const pulse = 1 + Math.max(0,flash)*0.25;
+  ctx.save(); ctx.translate(x,y); ctx.scale(pulse,pulse);
+  ctx.save(); ctx.globalAlpha=0.5+0.2*Math.sin(t*4); ctx.fillStyle='#FFDC50';
+  ctx.beginPath(); ctx.arc(0,0,r+8,0,Math.PI*2); ctx.fill(); ctx.restore();
+  ell(0,0,r,r,0,'#fff','#5B2D9B',4);
+  ctx.fillStyle='#5B2D9B'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.font = '900 ' + (tg.v.length>1 ? 34 : 44) + 'px system-ui,-apple-system,Arial,sans-serif';
+  ctx.fillText(tg.v, 0, 3);
+  ctx.restore();
+}
+
+/* ---------- Update ---------- */
+let last = performance.now();
+function frame(now){
+  const dt = Math.min(0.04, (now-last)/1000);
+  last = now; lastDt = dt; t += dt;
+  if(state==='play' && !paused) update(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+function update(dt){
+  const tv = target().v;
+  bubbles.forEach(b=>{
+    b.y += b.vy*dt; b.ph += dt; b.x += Math.sin(b.ph*1.1)*b.sw*dt; b.born += dt;
+    if(b.wob>0) b.wob -= dt;
+    if(b.x < b.r) b.x = b.r; if(b.x > W-b.r) b.x = W-b.r;
+  });
+  bubbles = bubbles.filter(b=> !b.dead && b.y > -b.r*2);
+  spawnT -= dt;
+  if(spawnT <= 0 && bubbles.length < maxBubbles()){ spawnBubble(false); spawnT = rnd(0.7,1.2); }
+  // Always keep the target letter reachable: if none on screen, pop one in at the bottom right away.
+  if(!bubbles.some(b=>b.label===tv)) spawnBubble(true, H - bubbleR() - 4);
+  parts.forEach(p=>{ p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=160*dt; p.life-=dt*1.5; });
+  parts = parts.filter(p=>p.life>0);
+  ripples.forEach(r=>{ r.r += 120*dt; r.life -= dt*2.2; });
+  ripples = ripples.filter(r=>r.life>0);
+  sayT += dt;
+  if(flash>0) flash -= dt*1.6;
+}
+function draw(){
+  drawWater();
+  drawReef();
+  bubbles.forEach(drawBubble);
+  drawZeezixScene();
+  drawParts();
+  drawTargetBadge();
+}
+requestAnimationFrame(frame);
+
+/* iOS audio unlock on first touch */
+document.addEventListener('pointerdown', ()=>{ ensureAudio(); if(audioCtx && audioCtx.state==='suspended') audioCtx.resume(); }, {once:true});
+
+/* Boot: load save data, signal Playables, mark ready to play */
+(async function boot(){
+  await bootSave();
+  // First frame about to draw — notify YouTube
+  requestAnimationFrame(()=>{
+    YTGame.firstFrameReady();
+    // We're interactable as soon as the menu overlay is up (which it already is)
+    YTGame.gameReady();
+  });
+})();
+</script>
+</body>
+</html>
